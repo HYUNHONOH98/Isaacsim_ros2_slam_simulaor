@@ -10,7 +10,11 @@ from tf2_ros import TransformBroadcaster, TransformStamped
 from builtin_interfaces.msg import Time as TimeMsg
 from rclpy.parameter import Parameter
 from .functions import to_ros_time_from_seconds
-
+from tf2_ros.buffer import Buffer
+from tf2_ros.transform_listener import TransformListener
+import tf2_geometry_msgs  # 변환 연산 지원
+import numpy as np
+from tf_transformations import quaternion_matrix, translation_matrix, concatenate_matrices, inverse_matrix, quaternion_from_matrix
 class OdomPublisher(Node):
     def __init__(self):
         super().__init__('odom_publisher',
@@ -20,6 +24,8 @@ class OdomPublisher(Node):
         )
         self.odom_pub = self.create_publisher(Odometry, '/g1/odom', 10)
         self.tf_broadcaster = TransformBroadcaster(self)
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
 
     def publish_odometry(self, pos, quat, lin_vel, ang_vel, simtime):
         """
@@ -62,7 +68,7 @@ class OdomPublisher(Node):
 
     def publish_tf(self, pos, quat, simtime):
         t = TransformStamped()
-        t.header.stamp = self.get_clock().now().to_msg()
+        # t.header.stamp = self.get_clock().now().to_msg()
         t.header.stamp = to_ros_time_from_seconds(simtime)
         t.header.frame_id = "odom"
         t.child_frame_id = "pelvis"

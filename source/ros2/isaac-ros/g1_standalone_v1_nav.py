@@ -50,6 +50,9 @@ quat_apply = math_utils.as_np(
 wrap_to_pi = math_utils.as_np(
     math_utils.wrap_to_pi
 )
+yaw_quat = math_utils.as_np(
+    math_utils.yaw_quat
+)
 
 import rclpy
 
@@ -373,6 +376,20 @@ imu_sensor = my_world.scene.add(
 simulation_app.update()
 
 
+# imu_prim_path = "/World/g1/pelvis/imu_sensor"
+# imu_sensor = my_world.scene.add(
+#     IMUSensor(
+#         prim_path=imu_prim_path,
+#         name="imu",
+#         dt=1/200,
+#         linear_acceleration_filter_size = 1,
+#         angular_velocity_filter_size = 1,
+#         orientation_filter_size = 1,
+#     )
+# )
+# simulation_app.update()
+
+
 # =============================== LiDAR sensor ===============================
 lidar_name = "OS1_REV6_32ch10hz512res"
 # lidar_name = "OS1_REV6_32ch10hz1024res"
@@ -423,6 +440,7 @@ fixed = True
 import numpy as np
 from pxr import Gf
 from omni.isaac.core.prims import XFormPrimView
+import os
 
 path = "/World/g1/torso_link/mid360_link"
 xform_view = XFormPrimView(prim_paths_expr=path, name="mid360_xform_view")
@@ -489,6 +507,10 @@ odom_pub_node = OdomPublisher()
 nodes.append(odom_pub_node)
 lidar_node = PointCloudPublisher()
 nodes.append(lidar_node)
+slam_node = SlamSubscriber()
+nodes.append(slam_node)
+lidar_tf_node = LidarTFPublisher()
+nodes.append(lidar_tf_node)
 
 # =============================== Parameters ===============================
 lidar_iter = 0
@@ -510,16 +532,29 @@ lidar_ang_jitters = np.zeros((1,1))
 vel_command_b = np.zeros(3)
 policy = torch.jit.load(args.policy_path)
 
+# Navigation_policy_params
 nav_policy = torch.jit.load(args.nav_policy_path)
+prev_nav_action = None
+est_base_pos = None
+est_base_quat = None
+
+# Loggers
+slam_errors = np.zeros((1,1))
+pos_command_bs = np.zeros((1,1))
+gt_errors = np.zeros((1,1))
+heading_error_bs = np.zeros((1,1))
 
 # =============================== Hyper-parameters ===============================
 free_iter = 2000
 
-heading_target = 0.0
 # heading_target = -math.pi
-vel_command_b[0] = 0.1
-LAST_ITER = 5000
+LAST_ITER = 7000
 
+# target_pos_w = np.array([0.5, 0., 0.0])
+# heading_target = math.pi/4
+
+target_pos_w = np.array([1.0, 1.0, 0.0])
+heading_target = 0
 # =============================== Main iteration ===============================
 is_first_released = False
 print_simtime = 0
@@ -570,7 +605,7 @@ while simulation_app.is_running():
         prev_lidar_ang_vel = lidar_ang_vel.copy()
 
     # imu rate 50Hz
-    if current_iter % 4 == 0 or is_first_released :
+    if ( current_iter % 4 == 0 or is_first_released ) and est_base_pos is not None and est_base_quat is not None:
         is_first_released = False
         qj = np.array(av.get_joint_positions()[0])
         dqj = np.array(av.get_joint_velocities()[0])
@@ -578,15 +613,60 @@ while simulation_app.is_running():
         sin_p, cos_p = np.sin(2*np.pi*phase), np.cos(2*np.pi*phase)
 
         qj_rel = qj - g1.default_pos
-        forward_w = quat_apply(base_quat.astype(np.float32), np.array([1., 0., 0.]).astype(np.float32))
+        forward_w = quat_apply(est_base_quat.astype(np.float32), np.array([1., 0., 0.]).astype(np.float32))
         heading_w = np.arctan2(forward_w[1], forward_w[0])
         heading_error = wrap_to_pi(np.array([heading_target]).astype(np.float32) - np.array([heading_w]).astype(np.float32))
-        vel_command_b[2] = np.clip(
-            heading_error[0],
-            -1.0,
-            1.0,
-        )
+        target_vec = target_pos_w - est_base_pos
+        target_vec[2] = 0.0
+        pos_command_b = quat_rotate_inverse(yaw_quat(est_base_quat).astype(np.float32), target_vec.astype(np.float32))
+
+
+        
+        # pos_command_b[2]
+        pos_command = np.concatenate([pos_command_b, heading_error])
+
         base_ang_vel_b = quat_rotate_inverse(base_quat.astype(np.float32), angular_velocities)
+        heading_error_bs = np.vstack((heading_error_bs, heading_error.reshape(1,1)))
+        slam_errors = np.vstack((slam_errors, np.linalg.norm(base_pos[:2] - est_base_pos[:2]).reshape((1,1))))
+        pos_command_bs = np.vstack((pos_command_bs, np.linalg.norm(pos_command_b[:2]).reshape((1,1))))
+        
+        gt_errors = np.vstack((gt_errors, np.linalg.norm(target_pos_w[:2] - base_pos[:2]).reshape((1,1))))
+        
+        # OPTION 1 : Determine the end at the last timestep.
+        # if np.linalg.norm(pos_command_b[:2]) < 0.01 and heading_error[0] < 0.1:
+        #     current_iter = LAST_ITER
+
+        # OPTION 2 : Determine the end using windowed avg.
+        if pos_command_bs.shape[0] > 10:
+            if np.mean(pos_command_bs[-10:, :].reshape((10,))) < 0.01 and np.mean(heading_error_bs[-10:, :].reshape((10,))) < 0.1:
+                current_iter = LAST_ITER
+
+        # Navigation
+        if current_iter % 40:
+            if prev_nav_action is None:
+                prev_nav_action = np.zeros(3)
+            nav_obs = np.concatenate([
+                # angular_velocities,
+                base_ang_vel_b,
+                gravity_ori,
+                pos_command,
+                qj_rel,
+                # qj,
+                dqj,
+                prev_nav_action,
+                np.array([sin_p, cos_p])
+            ]).astype(np.float32)
+            obs_tensor = torch.from_numpy(nav_obs).unsqueeze(0)
+
+            nav_action = nav_policy(obs_tensor).detach().numpy().squeeze()
+            x, y, z = nav_action[0], nav_action[1], nav_action[2]
+            x = np.clip(x, -0.1, 0.1)
+            y = np.clip(y, -0.1, 0.1)
+            z = np.clip(z, -0.2, 0.2)
+            vel_command_b[:] = np.array([x, y, z]).astype(np.float32)
+
+            prev_nav_action = vel_command_b[:].copy()
+
         if prev_action is None:
             prev_action = np.zeros(29)
         obs = np.concatenate([
@@ -620,7 +700,10 @@ while simulation_app.is_running():
     # imu rate 200Hz
     imu_pub_node.publish_imu(imu_sensor.get_current_frame(read_gravity=True), simtime=simtime)
     odom_pub_node.publish_odometry(base_pos, base_quat, linear_velocities, angular_velocities, simtime=simtime)
-    
+    lidar_pos, lidar_quat = xform_view.get_world_poses()
+    lidar_tf_node.publish_tf(lidar_pos[0], lidar_quat[0], base_pos, base_quat, simtime)
+    est_base_pos, est_base_quat = slam_node.subscribe_est_base_pose()
+
     current_iter += 1
     # Physics rate 200Hz
     my_world.step(render=False)
@@ -632,7 +715,7 @@ while simulation_app.is_running():
     if current_iter % lidar_iter == 0: 
         lidar_node.publish_from_dict(annotator.get_data(), frame_id="lidar_sensor", scan_rate = lidar_scan_rate, simtime=simtime)
 
-    if current_iter == LAST_ITER:
+    if current_iter >= LAST_ITER:
         print("====== ACC ======")
         print(
             "lidar lin acc mean:",
@@ -678,6 +761,33 @@ while simulation_app.is_running():
         )
         print("lidar lin jitter max:", np.round(np.max(lidar_lin_jitters, axis=0), 4))
         print("lidar ang jitter max:", np.round(np.max(lidar_ang_jitters, axis=0), 4))
+
+        print("====== NAVIGATION ERROR ======")
+        final_xy_pos_error = np.linalg.norm(base_pos[:2] - target_pos_w[:2])
+        final_orientation_error = np.abs(heading_error)
+        print("final_xy_pos_error : ", round(final_xy_pos_error, 4))
+        print("final_orientation_error : ", round(final_orientation_error[0], 4))
+
+        import matplotlib.pyplot as plt
+
+        # Create directory if it doesn't exist
+        log_dir = os.path.join(os.path.dirname(__file__), "g1_data", "exp_log")
+        os.makedirs(log_dir, exist_ok=True)
+
+        # Plot both slam_errors and pos_command_bs together
+        plt.figure()
+        plt.ylim(0, 0.2)
+        plt.plot(slam_errors, label="GT pos <> Est pos Error (SLAM error)")
+        plt.plot(pos_command_bs, label="Target pos <> Est pos Error")
+        plt.plot(gt_errors, label="Target pos <> GT pos Error")
+        plt.xlabel("Step")
+        plt.ylabel("Value")
+        plt.title("Errors over Over Time")
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(os.path.join(log_dir, "errors.png"))
+        plt.close()
+
         simulation_app.close()
                 
         for node in nodes:
