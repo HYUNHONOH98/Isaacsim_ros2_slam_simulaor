@@ -155,7 +155,7 @@ def main():
     done_env_mask = torch.zeros(env.num_envs, dtype=torch.bool, device=args_cli.device)
 
     while simulation_app.is_running():
-        from isaacsim.core.api.simulation_context import SimulationContext
+        # from isaacsim.core.api.simulation_context import SimulationContext
 
         # sim = SimulationContext.instance()  # 이미 생성된 컨텍스트 반환
         # print("physics_dt:", sim.get_physics_dt())         # 예: 0.0083333 (120Hz)

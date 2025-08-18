@@ -556,9 +556,10 @@ LAST_ITER = 8000
 target_pos_w = np.array([-0.5, -0.5, 0.0])
 heading_target = -math.pi/2
 
-SLOW_BOUND = 0.1
+SLOW_BOUND = 0.2
 MAX_LIN_VEL = 0.1
 MAX_ANG_VEL = 0.2
+NAV_HZ = 5
 # =============================== Main iteration ===============================
 is_first_released = False
 print_simtime = 0
@@ -637,22 +638,24 @@ while simulation_app.is_running():
         gt_errors = np.vstack((gt_errors, np.linalg.norm(target_pos_w[:2] - base_pos[:2]).reshape((1,1))))
         
         # OPTION 1 : Determine the end at the last timestep.
-        # if np.linalg.norm(pos_command_b[:2]) < 0.01 and heading_error[0] < 0.01:
-        #     current_iter = LAST_ITER
+        if np.linalg.norm(pos_command_b[:2]) < 0.01 and heading_error[0] < 0.01:
+            current_iter = LAST_ITER
 
         # OPTION 2 : Determine the end using windowed avg.
         NUM_AVG = 10
         if pos_command_bs.shape[0] > NUM_AVG:
             print("AVG pos error : ", round(np.mean(pos_command_bs[-NUM_AVG:, :].reshape((NUM_AVG,))), 4))
             print("AVG ori error : ", round(np.mean(np.abs(heading_error_bs[-NUM_AVG:, :]).reshape((NUM_AVG,))), 4))
-            if np.mean(pos_command_bs[-NUM_AVG:, :].reshape((NUM_AVG,))) < 0.1 \
-                and np.mean(np.abs(heading_error_bs[-NUM_AVG:, :]).reshape((NUM_AVG,))) < 0.1:
+            if np.mean(pos_command_bs[-NUM_AVG:, :].reshape((NUM_AVG,))) < 0.05 \
+                and np.mean(np.abs(heading_error_bs[-NUM_AVG:, :]).reshape((NUM_AVG,))) < 0.05:
                 current_iter = LAST_ITER
 
         # Navigation
-        if current_iter % 40:
+        if current_iter % int(200/NAV_HZ):
             vel_command_b[:2] = np.clip(np.sign(pos_command_b[:2]) * MAX_LIN_VEL * np.sqrt(np.abs(pos_command_b[:2] / SLOW_BOUND)), -MAX_LIN_VEL, MAX_LIN_VEL)
             vel_command_b[2] = np.clip(np.sign(heading_error) * MAX_ANG_VEL * np.sqrt(np.abs(heading_error / SLOW_BOUND)), -MAX_ANG_VEL, MAX_ANG_VEL)
+            # vel_command_b[:2] = np.clip(np.sign(pos_command_b[:2]) * np.sqrt(np.abs(pos_command_b[:2] / SLOW_BOUND)), -MAX_LIN_VEL, MAX_LIN_VEL)
+            # vel_command_b[2] = np.clip(np.sign(heading_error)  * np.sqrt(np.abs(heading_error / SLOW_BOUND)), -MAX_ANG_VEL, MAX_ANG_VEL)
 
         if prev_action is None:
             prev_action = np.zeros(29)
