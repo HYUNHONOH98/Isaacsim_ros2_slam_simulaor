@@ -212,7 +212,7 @@ def main():
                         file.write(f"{args_cli.test_type} {agent_cfg.load_run} : {env.unwrapped.num_envs - early_ter} / {env.unwrapped.num_envs} : {1 - early_ter / env.unwrapped.num_envs:.2%}\n")
                         file.close()
 
-                if j == interval - 2 and (args_cli.test_type == "velocity"):
+                if j == interval - 1 and (args_cli.test_type == "velocity"):
                     print(f"{agent_cfg.load_run} xy : {extras['log']['Metrics/base_velocity/error_vel_xy_log']:.4f}, yaw : {extras['log']['Metrics/base_velocity/error_vel_yaw_log']:.4f}\n")
                     if args_cli.logging_file is not None:
                         file = open(args_cli.logging_file, "a")
