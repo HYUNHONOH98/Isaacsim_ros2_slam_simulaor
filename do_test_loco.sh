@@ -23,6 +23,12 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             ;;
+        --test_type)
+            if [[ -n "$2" && ! "$2" =~ ^-- ]]; then
+                TEST_TYPE="--test_type $2"
+                shift 2
+            fi
+            ;;
         --num_envs)
             if [[ -n "$2" ]] && [[ "$2" =~ ^[0-9]+$ ]]; then
                 NUM_ENVS="--num_envs $2"
@@ -47,6 +53,7 @@ echo "
     --video --video_length 406 \
     $HEADLESS_FLAG \
     $LOAD_RUN \
+    $TEST_TYPE \
     $NUM_ENVS $OTHER_ARGS
 "
 
@@ -57,5 +64,6 @@ echo "
     --video --video_length 406 \
     $HEADLESS_FLAG \
     $LOAD_RUN \
+    $TEST_TYPE \
     $NUM_ENVS $OTHER_ARGS
 

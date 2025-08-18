@@ -71,6 +71,9 @@ class UniformVelocityCommand(CommandTerm):
         self.metrics["error_vel_xy"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["error_vel_yaw"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["action_acceleration"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["error_vel_xy_log"] = torch.zeros(self.num_envs, 350, device=self.device)
+        self.metrics["error_vel_yaw_log"] = torch.zeros(self.num_envs, 350, device=self.device)
+
         # -- similarity measure
         self.metrics["similarity_index_step_distance"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["similarity_index_air_time"] = torch.zeros(self.num_envs, device=self.device)
@@ -89,6 +92,7 @@ class UniformVelocityCommand(CommandTerm):
         self.lidar_ang_jerk_square_sum = torch.zeros(self.num_envs, device=self.device)
 
         self.env_counter = torch.zeros(self.num_envs, device=self.device)
+        self.step_counter = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
 
         # -- walking motion
         self.metrics["knee_actuation"] = torch.zeros(self.num_envs, device=self.device)
@@ -147,14 +151,8 @@ class UniformVelocityCommand(CommandTerm):
             dim=-1,
         )
         self.metrics["error_vel_yaw"] = torch.abs(self.vel_command_b[:, 2] - self.robot.data.root_ang_vel_b[:, 2])
-        # state = torch.cat(
-        #     [self.robot.data.root_lin_vel_b[:, :2], self.robot.data.root_ang_vel_b[:, 2].unsqueeze(1)], dim=1
-        # )
-        # self.vel_states = torch.cat([self.vel_states, state.unsqueeze(0)], dim=0)
-        # self.vel_cmds = torch.cat([self.vel_cmds, self.vel_command_b.unsqueeze(0)])
-        # ic(torch.mean(self.metrics["error_vel_xy"]))
-        # ic(torch.mean(self.metrics["error_vel_yaw"]))
-        # print()
+        self.metrics["error_vel_xy_log"][:, self.step_counter] = self.metrics["error_vel_xy"].clone()
+        self.metrics["error_vel_yaw_log"][:, self.step_counter] = self.metrics["error_vel_yaw"].clone()
         ########################## Walking motion ##########################
         self.metrics["pelvis_height"] = torch.abs(self.robot.data.root_pos_w[:, 2])
 
@@ -290,6 +288,7 @@ class UniformVelocityCommand(CommandTerm):
         return extras
 
     def _resample_command(self, env_ids: Sequence[int]):
+        self.step_counter[env_ids] += 1
         # sample velocity commands
         r = torch.empty(len(env_ids), device=self.device)
         # -- linear velocity - x direction
@@ -305,6 +304,19 @@ class UniformVelocityCommand(CommandTerm):
             self.is_heading_env[env_ids] = r.uniform_(0.0, 1.0) <= self.cfg.rel_heading_envs
         # update standing envs
         self.is_standing_env[env_ids] = r.uniform_(0.0, 1.0) <= self.cfg.rel_standing_envs
+
+        if self.cfg.test_type == "walking_alive" :
+            self.is_standing_env[env_ids] |= r.uniform_(0.0, 1.0) <= self.cfg.rel_standing_envs
+            early_mask = self.step_counter[env_ids] <= (1.0 / 0.2)   # 5 스텝
+            early_ids  = env_ids[early_mask]
+            self.is_standing_env[early_ids] = False
+
+            old_mask = self.step_counter[env_ids] > (4.5 / 0.2)      # 22.5 스텝
+            old_ids  = env_ids[old_mask]
+            self.is_standing_env[old_ids] = True
+
+        if self.cfg.test_type == "standing_alive":
+            self.is_standing_env[env_ids] = True
 
     def _update_command(self):
         """Post-processes the velocity command.

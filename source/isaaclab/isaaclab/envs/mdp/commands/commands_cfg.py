@@ -58,7 +58,9 @@ class UniformVelocityCommandCfg(CommandTermCfg):
 
     This parameter is only used if :attr:`heading_command` is True.
     """
-
+    test_type: str = None
+    """The type of the test to run. Defaults to None."""
+    
     @configclass
     class Ranges:
         """Uniform distribution ranges for the velocity commands."""

@@ -29,6 +29,8 @@ parser.add_argument(
     help="Use the pre-trained checkpoint from Nucleus.",
 )
 parser.add_argument("--real-time", action="store_true", default=False, help="Run in real-time, if possible.")
+parser.add_argument("--test_type", default=None, type=str, help="Test type to run. If None, run the default test.")
+parser.add_argument("--logging_file", type=str, default=None, help="Logging file name")
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
 # append AppLauncher cli args
@@ -155,35 +157,45 @@ def main():
     while simulation_app.is_running():
         from isaacsim.core.api.simulation_context import SimulationContext
 
-        sim = SimulationContext.instance()  # 이미 생성된 컨텍스트 반환
-        print("physics_dt:", sim.get_physics_dt())         # 예: 0.0083333 (120Hz)
-        print("render_dt :", sim.get_rendering_dt())          # 렌더링 간격
-        physics_context = sim.get_physics_context()
-        print("solver  :", physics_context.get_solver_type())
-        print("ccd  :", physics_context.is_ccd_enabled())
-        print("stabilization  :", physics_context.is_stablization_enabled())
-        print("get_broadphase_type  :", physics_context.get_broadphase_type())
-        print("get_enable_scene_query_support  :", physics_context.get_enable_scene_query_support())
-        print("get_friction_correlation_distance  :", physics_context.get_friction_correlation_distance())
-        print("get_friction_offset_threshold  :", physics_context.get_friction_offset_threshold())
-        print("get_gpu_collision_stack_size  :", physics_context.get_gpu_collision_stack_size())
-        print("get_physx_update_transformations_settings  :", physics_context.get_physx_update_transformations_settings())
-        print("is_gpu_dynamics_enabled  :", physics_context.is_gpu_dynamics_enabled())
-        print("get_invert_collision_group_filter  :", physics_context.get_invert_collision_group_filter())
-        print("get_gravity  :", physics_context.get_gravity())
-        print("get_gpu_total_aggregate_pairs_capacity  :", physics_context.get_gpu_total_aggregate_pairs_capacity())
-        print("get_gpu_temp_buffer_capacity  :", physics_context.get_gpu_temp_buffer_capacity())
-        print("get_gpu_max_soft_body_contacts  :", physics_context.get_gpu_max_soft_body_contacts())
-        print("get_gpu_max_rigid_patch_count  :", physics_context.get_gpu_max_rigid_patch_count())
-        print("get_gpu_max_particle_contacts  :", physics_context.get_gpu_max_particle_contacts())
-        print("get_gpu_heap_capacity  :", physics_context.get_gpu_heap_capacity())
-        print("get_gpu_found_lost_pairs_capacity  :", physics_context.get_gpu_found_lost_pairs_capacity())
-        print("get_gpu_found_lost_aggregate_pairs_capacity  :", physics_context.get_gpu_found_lost_aggregate_pairs_capacity())
-        print("get_bounce_threshold  :", physics_context.get_bounce_threshold())
+        # sim = SimulationContext.instance()  # 이미 생성된 컨텍스트 반환
+        # print("physics_dt:", sim.get_physics_dt())         # 예: 0.0083333 (120Hz)
+        # print("render_dt :", sim.get_rendering_dt())          # 렌더링 간격
+        # physics_context = sim.get_physics_context()
+        # print("solver  :", physics_context.get_solver_type())
+        # print("ccd  :", physics_context.is_ccd_enabled())
+        # print("stabilization  :", physics_context.is_stablization_enabled())
+        # print("get_broadphase_type  :", physics_context.get_broadphase_type())
+        # print("get_enable_scene_query_support  :", physics_context.get_enable_scene_query_support())
+        # print("get_friction_correlation_distance  :", physics_context.get_friction_correlation_distance())
+        # print("get_friction_offset_threshold  :", physics_context.get_friction_offset_threshold())
+        # print("get_gpu_collision_stack_size  :", physics_context.get_gpu_collision_stack_size())
+        # print("get_physx_update_transformations_settings  :", physics_context.get_physx_update_transformations_settings())
+        # print("is_gpu_dynamics_enabled  :", physics_context.is_gpu_dynamics_enabled())
+        # print("get_invert_collision_group_filter  :", physics_context.get_invert_collision_group_filter())
+        # print("get_gravity  :", physics_context.get_gravity())
+        # print("get_gpu_total_aggregate_pairs_capacity  :", physics_context.get_gpu_total_aggregate_pairs_capacity())
+        # print("get_gpu_temp_buffer_capacity  :", physics_context.get_gpu_temp_buffer_capacity())
+        # print("get_gpu_max_soft_body_contacts  :", physics_context.get_gpu_max_soft_body_contacts())
+        # print("get_gpu_max_rigid_patch_count  :", physics_context.get_gpu_max_rigid_patch_count())
+        # print("get_gpu_max_particle_contacts  :", physics_context.get_gpu_max_particle_contacts())
+        # print("get_gpu_heap_capacity  :", physics_context.get_gpu_heap_capacity())
+        # print("get_gpu_found_lost_pairs_capacity  :", physics_context.get_gpu_found_lost_pairs_capacity())
+        # print("get_gpu_found_lost_aggregate_pairs_capacity  :", physics_context.get_gpu_found_lost_aggregate_pairs_capacity())
+        # print("get_bounce_threshold  :", physics_context.get_bounce_threshold())
         
         start_time = time.time()
+
+        if args_cli.test_type is not None:
+            print(f"test type: {args_cli.test_type}")
+            term = env.unwrapped.command_manager.get_term("base_velocity")
+            term.cfg.test_type = args_cli.test_type
+            if args_cli.test_type == "velocity":
+                term.cfg.rel_standing_envs = 0.0
+                term.cfg.ranges.lin_vel_x = (0.1, 0.1)
+                term.cfg.ranges.lin_vel_y = (0.0, 0.0)
+                term.cfg.ranges.lin_vel_z = (-1.0, 1.0)
         # run everything in inference mode
-        for _ in range(interval):
+        for j in range(interval):
             with torch.inference_mode():
                 # agent stepping
                 actions = policy(obs)
@@ -192,7 +204,22 @@ def main():
             
                 done_env_ids = torch.where(dones & ~done_env_mask)[0]
                 done_env_mask[done_env_ids] = True
-                
+                if j == interval - 3 and (args_cli.test_type == "standing_alive" or args_cli.test_type == "walking_alive"):
+                    early_ter = done_env_mask.sum()
+                    print(f"{agent_cfg.load_run} : {env.unwrapped.num_envs - early_ter} / {env.unwrapped.num_envs} : {1 - early_ter / env.unwrapped.num_envs:.2%}\n")
+                    if args_cli.logging_file is not None:
+                        file = open(args_cli.logging_file, "a")
+                        file.write(f"{args_cli.test_type} {agent_cfg.load_run} : {env.unwrapped.num_envs - early_ter} / {env.unwrapped.num_envs} : {1 - early_ter / env.unwrapped.num_envs:.2%}\n")
+                        file.close()
+
+                if j == interval - 2 and (args_cli.test_type == "velocity"):
+                    print(f"{agent_cfg.load_run} xy : {extras['log']['Metrics/base_velocity/error_vel_xy_log']:.4f}, yaw : {extras['log']['Metrics/base_velocity/error_vel_yaw_log']:.4f}\n")
+                    if args_cli.logging_file is not None:
+                        file = open(args_cli.logging_file, "a")
+                        file.write(f"{args_cli.test_type} {agent_cfg.load_run} xy : {extras['log']['Metrics/base_velocity/error_vel_xy_log']:.4f}, yaw : {extras['log']['Metrics/base_velocity/error_vel_yaw_log']:.4f}\n")
+                        file.close()
+
+
                 for term in metric_terms:
                     per_env_key = f"Metrics/base_velocity/per_env/{term}"
                     if per_env_key in extras["log"]:

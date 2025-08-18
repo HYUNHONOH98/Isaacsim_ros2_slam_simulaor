@@ -555,6 +555,10 @@ LAST_ITER = 8000
 
 target_pos_w = np.array([-0.5, -0.5, 0.0])
 heading_target = -math.pi/2
+
+SLOW_BOUND = 0.1
+MAX_LIN_VEL = 0.1
+MAX_ANG_VEL = 0.2
 # =============================== Main iteration ===============================
 is_first_released = False
 print_simtime = 0
@@ -633,11 +637,11 @@ while simulation_app.is_running():
         gt_errors = np.vstack((gt_errors, np.linalg.norm(target_pos_w[:2] - base_pos[:2]).reshape((1,1))))
         
         # OPTION 1 : Determine the end at the last timestep.
-        # if np.linalg.norm(pos_command_b[:2]) < 0.01 and heading_error[0] < 0.1:
+        # if np.linalg.norm(pos_command_b[:2]) < 0.01 and heading_error[0] < 0.01:
         #     current_iter = LAST_ITER
 
         # OPTION 2 : Determine the end using windowed avg.
-        NUM_AVG = 100
+        NUM_AVG = 10
         if pos_command_bs.shape[0] > NUM_AVG:
             print("AVG pos error : ", round(np.mean(pos_command_bs[-NUM_AVG:, :].reshape((NUM_AVG,))), 4))
             print("AVG ori error : ", round(np.mean(np.abs(heading_error_bs[-NUM_AVG:, :]).reshape((NUM_AVG,))), 4))
@@ -647,29 +651,8 @@ while simulation_app.is_running():
 
         # Navigation
         if current_iter % 40:
-            if prev_nav_action is None:
-                prev_nav_action = np.zeros(3)
-            nav_obs = np.concatenate([
-                # angular_velocities,
-                base_ang_vel_b,
-                gravity_ori,
-                pos_command,
-                qj_rel,
-                # qj,
-                dqj,
-                prev_nav_action,
-                np.array([sin_p, cos_p])
-            ]).astype(np.float32)
-            obs_tensor = torch.from_numpy(nav_obs).unsqueeze(0)
-
-            nav_action = nav_policy(obs_tensor).detach().numpy().squeeze()
-            x, y, z = nav_action[0], nav_action[1], nav_action[2]
-            x = np.clip(x, -0.1, 0.1)
-            y = np.clip(y, -0.1, 0.1)
-            z = np.clip(z, -0.2, 0.2)
-            vel_command_b[:] = np.array([x, y, z]).astype(np.float32)
-
-            prev_nav_action = vel_command_b[:].copy()
+            vel_command_b[:2] = np.clip(np.sign(pos_command_b[:2]) * MAX_LIN_VEL * np.sqrt(np.abs(pos_command_b[:2] / SLOW_BOUND)), -MAX_LIN_VEL, MAX_LIN_VEL)
+            vel_command_b[2] = np.clip(np.sign(heading_error) * MAX_ANG_VEL * np.sqrt(np.abs(heading_error / SLOW_BOUND)), -MAX_ANG_VEL, MAX_ANG_VEL)
 
         if prev_action is None:
             prev_action = np.zeros(29)
