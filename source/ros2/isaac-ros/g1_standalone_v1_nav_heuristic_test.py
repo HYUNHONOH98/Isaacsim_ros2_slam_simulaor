@@ -548,14 +548,35 @@ heading_error_bs = np.zeros((1,1))
 free_iter = 2000
 
 # heading_target = -math.pi
-LAST_ITER = 8000
+LAST_ITER = 16000
 
 # target_pos_w = np.array([0.5, 0., 0.0])
 # heading_target = math.pi/4
 
-target_pos_w = np.array([-1.0, 0.0, 0.0])
-heading_target = 0.
-# heading_target = -math.pi/2
+target_pose_list = np.array([
+    # go forward
+    [1.0, 0.0, 0.0, 0.0],
+    # go backward
+    [0.0, 0.0, 0.0, 0.0],
+    # go left
+    [0.0, 1.0, 0.0, 0.0],
+    # go right
+    [0.0, 0.0, 0.0, 0.0],
+    # turn left
+    [0.0, 0.0, 0.0, math.pi/2],
+    # turn right
+    [0.0, 0.0, 0.0, 0.0],
+])
+errors_per_pose = {
+    0: ("go forward", []),
+    1: ("go backward", []),
+    2: ("go left", []),
+    3: ("go right", []),
+    4: ("turn left", []),
+    5: ("turn right", []),
+}
+current_target_pose_idx = 0
+time_per_pose = 2000
 
 SLOW_BOUND = 0.4
 MAX_LIN_VEL = 0.2
@@ -614,6 +635,10 @@ while simulation_app.is_running():
 
     # imu rate 50Hz
     if ( current_iter % 4 == 0 or is_first_released ) and est_base_pos is not None and est_base_quat is not None:
+        # Iterate over the target poses
+        heading_target = target_pose_list[current_target_pose_idx][3]
+        target_pos_w = target_pose_list[current_target_pose_idx][:3]
+
         is_first_released = False
         qj = np.array(av.get_joint_positions()[0])
         dqj = np.array(av.get_joint_velocities()[0])
@@ -649,8 +674,24 @@ while simulation_app.is_running():
             # print("AVG pos error : ", round(np.mean(pos_command_bs[-NUM_AVG:, :].reshape((NUM_AVG,))), 4))
             # print("AVG ori error : ", round(np.mean(np.abs(heading_error_bs[-NUM_AVG:, :]).reshape((NUM_AVG,))), 4))
             if np.mean(pos_command_bs[-NUM_AVG:, :].reshape((NUM_AVG,))) < ERROR_THRESHOLD \
-                and np.mean(np.abs(heading_error_bs[-NUM_AVG:, :]).reshape((NUM_AVG,))) < 0.05:
+                and np.mean(np.abs(heading_error_bs[-NUM_AVG:, :]).reshape((NUM_AVG,))) < 0.05 \
+                and errors_per_pose[current_target_pose_idx][1] == []:
+                print(f"========= {errors_per_pose[current_target_pose_idx][0]} completed =========")
+                pos_error = round(np.linalg.norm(base_pos[:2] - target_pos_w[:2]), 4)
+                ori_error = round(np.abs(heading_error[0]), 4)
+                print("pos error : ", pos_error)
+                print("ori error : ", ori_error)
+                print("===========================================")
+                errors_per_pose[current_target_pose_idx][1].append(pos_error)
+                errors_per_pose[current_target_pose_idx][1].append(ori_error)
+                time_per_pose = 0
+
+        if time_per_pose == 0:
+            time_per_pose = 2000
+            current_target_pose_idx += 1
+            if current_target_pose_idx >= len(target_pose_list):
                 current_iter = LAST_ITER
+        time_per_pose -= 1
 
         # Navigation
         if current_iter % int(200/NAV_HZ):
@@ -753,10 +794,15 @@ while simulation_app.is_running():
         print("lidar ang jitter max:", np.round(np.max(lidar_ang_jitters, axis=0), 4))
 
         print("====== NAVIGATION ERROR ======")
-        final_xy_pos_error = np.linalg.norm(base_pos[:2] - target_pos_w[:2])
-        final_orientation_error = np.abs(heading_error)
-        print("final_xy_pos_error : ", round(final_xy_pos_error, 4))
-        print("final_orientation_error : ", round(final_orientation_error[0], 4))
+        # final_xy_pos_error = np.linalg.norm(base_pos[:2] - target_pos_w[:2])
+        # final_orientation_error = np.abs(heading_error)
+        # print("final_xy_pos_error : ", round(final_xy_pos_error, 4))
+        # print("final_orientation_error : ", round(final_orientation_error[0], 4))
+        for idx, (pose_name, errors) in errors_per_pose.items():
+            if errors:
+                print(f"{pose_name} \n - XY Error: {errors[0]} \n - Orientation Error: {errors[1]}")
+            else:
+                print(f"{pose_name} - Not completed yet.")
 
         import matplotlib.pyplot as plt
 
