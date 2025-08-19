@@ -191,12 +191,35 @@ def main():
             term.cfg.test_type = args_cli.test_type
             if args_cli.test_type == "velocity":
                 term.cfg.rel_standing_envs = 0.0
+                
                 term.cfg.ranges.lin_vel_x = (0.1, 0.1)
                 term.cfg.ranges.lin_vel_y = (0.0, 0.0)
                 term.cfg.ranges.lin_vel_z = (-1.0, 1.0)
+            elif args_cli.test_type == "standing_alive":
+                term.cfg.rel_standing_envs = 1.0
+                term.cfg.rel_heading_envs = 0.0
+                term.cfg.ranges.lin_vel_x = (0.0, 0.0)
+                term.cfg.ranges.lin_vel_y = (0.0, 0.0)
+                term.cfg.ranges.lin_vel_z = (0.0, 0.0)
+                term.cfg.resampling_time_range = (0.2, 0.2)
+            elif args_cli.test_type == "walking_alive":
+                term.cfg.resampling_time_range = (0.2, 0.2)
+
+        with torch.inference_mode():
+            env.reset()
+            obs, _ = env.get_observations()
+            safe_iter = 10
+            for _ in range(safe_iter):
+                actions = policy(obs)
+                obs, _, dones, extras = env.step(actions)
+            env.reset()
+        
         # run everything in inference mode
-        for j in range(interval):
-            with torch.inference_mode():
+        with torch.inference_mode():
+            env.reset()
+            obs, _ = env.get_observations()
+
+            for j in range(interval):
                 # agent stepping
                 actions = policy(obs)
                 # env stepping
@@ -213,7 +236,9 @@ def main():
                         file.close()
 
                 if j == interval - 1 and (args_cli.test_type == "velocity"):
-                    print(f"{agent_cfg.load_run} xy : {extras['log']['Metrics/base_velocity/error_vel_xy_log']:.4f}, yaw : {extras['log']['Metrics/base_velocity/error_vel_yaw_log']:.4f}\n")
+                    print(f"""{agent_cfg.load_run} x : {extras['log']['Metrics/base_velocity/error_vel_x_log']:.4f} , \
+                           y : {extras['log']['Metrics/base_velocity/error_vel_y_log']:.4f} , \
+                           yaw : {extras['log']['Metrics/base_velocity/error_vel_yaw_log']:.4f}\n""")
                     if args_cli.logging_file is not None:
                         file = open(args_cli.logging_file, "a")
                         file.write(f"{args_cli.test_type} {agent_cfg.load_run} xy : {extras['log']['Metrics/base_velocity/error_vel_xy_log']:.4f}, yaw : {extras['log']['Metrics/base_velocity/error_vel_yaw_log']:.4f}\n")

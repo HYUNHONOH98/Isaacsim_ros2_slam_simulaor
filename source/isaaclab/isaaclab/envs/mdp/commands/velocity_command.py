@@ -73,6 +73,8 @@ class UniformVelocityCommand(CommandTerm):
         self.metrics["action_acceleration"] = torch.zeros(self.num_envs, device=self.device)
         self.step_counter = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self.metrics["error_vel_xy_log"] = torch.zeros(self.num_envs, 351, device=self.device)
+        self.metrics["error_vel_x_log"] = torch.zeros(self.num_envs, 351, device=self.device)
+        self.metrics["error_vel_y_log"] = torch.zeros(self.num_envs, 351, device=self.device)
         self.metrics["error_vel_yaw_log"] = torch.zeros(self.num_envs, 351, device=self.device)
 
         # -- similarity measure
@@ -152,9 +154,12 @@ class UniformVelocityCommand(CommandTerm):
         )
         self.metrics["error_vel_yaw"] = torch.abs(self.vel_command_b[:, 2] - self.robot.data.root_ang_vel_b[:, 2])
         row = torch.arange(self.num_envs, device=self.device)
-        col = self.step_counter.to(torch.long).clamp(max=self.metrics["error_vel_xy_log"].shape[1] - 1) # why?
-        self.metrics["error_vel_xy_log"][row, col] = self.metrics["error_vel_xy"].clone()
+        col = self.step_counter.to(torch.long).clamp(max=self.metrics["error_vel_x_log"].shape[1] - 1) # why?
+        self.metrics["error_vel_x_log"][row, col] = torch.abs(self.vel_command_b[:, 0] - self.robot.data.root_lin_vel_b[:, 0])
+        self.metrics["error_vel_y_log"][row, col] = torch.abs(self.vel_command_b[:, 1] - self.robot.data.root_lin_vel_b[:, 1])
+        # self.metrics["error_vel_xy_log"][row, col] = self.metrics["error_vel_xy"].clone()
         self.metrics["error_vel_yaw_log"][row, col] = self.metrics["error_vel_yaw"].clone()
+        # print(torch.mean(self.metrics["error_vel_xy_log"]))
         self.step_counter += 1
         ########################## Walking motion ##########################
         self.metrics["pelvis_height"] = torch.abs(self.robot.data.root_pos_w[:, 2])

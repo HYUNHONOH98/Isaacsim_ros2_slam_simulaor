@@ -162,7 +162,7 @@ class CommandTerm(ManagerTermBase):
         # reduce the time left before resampling
         self.time_left -= dt
         # resample the command if necessary
-        resample_env_ids = (self.time_left <= 0.0).nonzero().flatten()
+        resample_env_ids = (self.time_left <= 0.00001).nonzero().flatten()
         if len(resample_env_ids) > 0:
             self._resample(resample_env_ids)
         # update the command

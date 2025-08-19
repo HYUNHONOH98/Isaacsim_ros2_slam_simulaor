@@ -419,7 +419,7 @@ class G1LocomotionEnvCfg_PLAY(G1LocomotionEnvCfg):
 
 
         self.episode_length_s = 10.0
-        self.commands.base_velocity.resampling_time_range = (self.episode_length_s, self.episode_length_s)
+        self.commands.base_velocity.resampling_time_range = (0.2, 0.2)
         # make a smaller scene for play
         self.scene.num_envs = 50
         self.scene.env_spacing = 2.5

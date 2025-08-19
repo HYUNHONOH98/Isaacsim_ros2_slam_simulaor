@@ -596,6 +596,9 @@ while simulation_app.is_running():
             -1.0,
             1.0,
         )
+        # vel_command_b = np.zeros(3)
+        # phase = 0
+        # sin_p, cos_p = np.sin(2*np.pi*phase), np.cos(2*np.pi*phase)
 
         if prev_action is None:
             prev_action = np.zeros(15)

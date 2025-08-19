@@ -29,6 +29,8 @@ parser.add_argument(
     help="Use the pre-trained checkpoint from Nucleus.",
 )
 parser.add_argument("--real-time", action="store_true", default=False, help="Run in real-time, if possible.")
+parser.add_argument("--test_type", default=None, type=str, help="Test type to run. If None, run the default test.")
+parser.add_argument("--logging_file", type=str, default=None, help="Logging file name")
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
 # append AppLauncher cli args
@@ -120,11 +122,43 @@ def main():
     interval = int(env.unwrapped.max_episode_length)
     done_env_mask = torch.zeros(env.num_envs, dtype=torch.bool, device=args_cli.device)
 
+        
     while simulation_app.is_running():
         start_time = time.time()
+
+        if args_cli.test_type is not None:
+            print(f"test type: {args_cli.test_type}")
+            term = env.unwrapped.command_manager.get_term("base_velocity")
+            term.cfg.test_type = args_cli.test_type
+            if args_cli.test_type == "velocity":
+                term.cfg.rel_standing_envs = 0.0
+                
+                term.cfg.ranges.lin_vel_x = (0.1, 0.1)
+                term.cfg.ranges.lin_vel_y = (0.0, 0.0)
+                term.cfg.ranges.lin_vel_z = (-1.0, 1.0)
+            elif args_cli.test_type == "standing_alive":
+                term.cfg.rel_standing_envs = 1.0
+                term.cfg.rel_heading_envs = 0.0
+                term.cfg.ranges.lin_vel_x = (0.0, 0.0)
+                term.cfg.ranges.lin_vel_y = (0.0, 0.0)
+                term.cfg.ranges.lin_vel_z = (0.0, 0.0)
+                term.cfg.resampling_time_range = (0.2, 0.2)
+            elif args_cli.test_type == "walking_alive":
+                term.cfg.resampling_time_range = (0.2, 0.2)
+
         # run everything in inference mode
-        for _ in range(interval):
-            with torch.inference_mode():
+        with torch.inference_mode():
+            env.reset()
+            obs, _ = env.get_observations()
+            safe_iter = 10
+            for _ in range(safe_iter):
+                actions = policy(obs)
+                obs, _, dones, extras = env.step(actions)
+            env.reset()
+        with torch.inference_mode():
+            env.reset()
+            obs, _ = env.get_observations()
+            for j in range(interval):
                 # agent stepping
                 actions = policy(obs)
                 # env stepping
@@ -132,7 +166,22 @@ def main():
             
                 done_env_ids = torch.where(dones & ~done_env_mask)[0]
                 done_env_mask[done_env_ids] = True
-                
+                if j == interval - 3 and (args_cli.test_type == "standing_alive" or args_cli.test_type == "walking_alive"):
+                    early_ter = done_env_mask.sum()
+                    print(f"{agent_cfg.load_run} : {env.unwrapped.num_envs - early_ter} / {env.unwrapped.num_envs} : {1 - early_ter / env.unwrapped.num_envs:.2%}\n")
+                    if args_cli.logging_file is not None:
+                        file = open(args_cli.logging_file, "a")
+                        file.write(f"{args_cli.test_type} {agent_cfg.load_run} : {env.unwrapped.num_envs - early_ter} / {env.unwrapped.num_envs} : {1 - early_ter / env.unwrapped.num_envs:.2%}\n")
+                        file.close()
+
+                if j == interval - 1 and (args_cli.test_type == "velocity"):
+                    print(f"""{agent_cfg.load_run} x : {extras['log']['Metrics/base_velocity/error_vel_x_log']:.4f} , \
+                           y : {extras['log']['Metrics/base_velocity/error_vel_y_log']:.4f} , \
+                           yaw : {extras['log']['Metrics/base_velocity/error_vel_yaw_log']:.4f}\n""")
+                    if args_cli.logging_file is not None:
+                        file = open(args_cli.logging_file, "a")
+                        file.write(f"{args_cli.test_type} {agent_cfg.load_run} xy : {extras['log']['Metrics/base_velocity/error_vel_xy_log']:.4f}, yaw : {extras['log']['Metrics/base_velocity/error_vel_yaw_log']:.4f}\n")
+                        file.close()
                 for term in metric_terms:
                     per_env_key = f"Metrics/base_velocity/per_env/{term}"
                     if per_env_key in extras["log"]:

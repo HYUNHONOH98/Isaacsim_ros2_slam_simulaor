@@ -129,18 +129,20 @@ class G1:
         if set_gains:    
             # Define the gain values for each pattern
             joint_patterns = {
-                'hip_yaw': (100, 2),   # (kp, kd) for hip_yaw joints
-                'hip_roll': (100, 2),  # (kp, kd) for hip_roll joints
-                'hip_pitch': (100, 2), # (kp, kd) for hip_pitch joints
-                'knee': (150, 4),     # (kp, kd) for knee joints
-                'ankle': (40, 2),      # (kp, kd) for ankle joints
+                'hip_yaw': (150, 5),   # (kp, kd) for hip_yaw joints
+                'hip_roll': (150, 5),  # (kp, kd) for hip_roll joints
+                'hip_pitch': (200, 5), # (kp, kd) for hip_pitch joints
+                'knee': (200, 5),     # (kp, kd) for knee joints
+                'ankle': (20, 2),      # (kp, kd) for ankle joints
+                # 'ankle': (10, 1),      # (kp, kd) for ankle joints
                 # ARM
                 'shoulder': (40, 10),
                 'elbow': (40, 10),
                 'wrist': (40, 10),
                 # waist
-                'waist': (150, 3)
+                'waist': (150, 5)
             }
+
 
             # Initialize lists to store the matching joint names and their respective gains
             matching_joint_names = []
@@ -175,17 +177,29 @@ class G1:
            'right_knee_joint' : 0.42,                                             
            'left_ankle_pitch_joint' : -0.23,     
            'right_ankle_pitch_joint': -0.23,                              
+            "left_elbow_joint": 1.0,
+            "right_elbow_joint": 1.0,
         #    'torso_joint' : 0.
-            'left_shoulder_pitch_joint': 0.35,
-            'left_shoulder_roll_joint': 0.16,
-            'right_shoulder_pitch_joint': 0.35,
-            'right_shoulder_roll_joint': -0.16,
+            'left_shoulder_pitch_joint': -0.2,
+            'left_shoulder_roll_joint': 0.35,
+            'right_shoulder_pitch_joint': -0.2,
+            'right_shoulder_roll_joint': -0.35,
         }
 
 
         self.joint_indices = []
-        for joint_seq in ['left_hip_pitch_joint', 'left_hip_roll_joint', 'left_hip_yaw_joint', 'left_knee_joint', 'left_ankle_pitch_joint', 'left_ankle_roll_joint',
-                'right_hip_pitch_joint', 'right_hip_roll_joint', 'right_hip_yaw_joint', 'right_knee_joint', 'right_ankle_pitch_joint', 'right_ankle_roll_joint']:
+        
+        for joint_seq in [
+            'left_hip_pitch_joint', 'right_hip_pitch_joint',
+            'waist_yaw_joint',
+            'left_hip_roll_joint', 'right_hip_roll_joint',
+            'waist_roll_joint',
+            'left_hip_yaw_joint', 'right_hip_yaw_joint',
+            'waist_pitch_joint',
+            'left_knee_joint', 'right_knee_joint',
+            'left_ankle_pitch_joint', 'right_ankle_pitch_joint',
+            'left_ankle_roll_joint', 'right_ankle_roll_joint',
+            ]:        
             assert joint_seq in full_joint_names, f"Joint {joint_seq} not found in robot's joint names"
             self.joint_indices.append(full_joint_names.index(joint_seq))
         self.joint_indices = np.array(self.joint_indices)
@@ -228,8 +242,7 @@ parser.add_argument("--map-path", type=str, default="/Isaac/Environments/Grid/de
 parser.add_argument("--physics_dt", type=float, default=1/200, help="Physics simulation time step")
 parser.add_argument("--rendering_dt", type=float, default=1/100, help="Rendering time step")
 # Policy parameters
-parser.add_argument("--policy-path", type=str, default="/workspace/isaaclab/source/ros2/isaac-ros/assets/weights/pre_train/g1/policy.pt", help="Path to the policy file")
-parser.add_argument("--nav-policy-path", type=str, default="/workspace/isaaclab/source/ros2/isaac-ros/assets/weights/navigation/navigation_policy_0623.pt", help="Path to the policy file")
+parser.add_argument("--policy-path", type=str, default="source/ros2/isaac-ros/assets/r2/exported/policy.pt", help="Path to the policy file")
 parser.add_argument("--action-scale", type=float, default=0.5, help="Scale for the action commands")
 parser.add_argument("--period", type=float, default=0.8, help="Phase command period")
 
@@ -376,20 +389,6 @@ imu_sensor = my_world.scene.add(
 simulation_app.update()
 
 
-# imu_prim_path = "/World/g1/pelvis/imu_sensor"
-# imu_sensor = my_world.scene.add(
-#     IMUSensor(
-#         prim_path=imu_prim_path,
-#         name="imu",
-#         dt=1/200,
-#         linear_acceleration_filter_size = 1,
-#         angular_velocity_filter_size = 1,
-#         orientation_filter_size = 1,
-#     )
-# )
-# simulation_app.update()
-
-
 # =============================== LiDAR sensor ===============================
 lidar_name = "OS1_REV6_32ch10hz512res"
 # lidar_name = "OS1_REV6_32ch10hz1024res"
@@ -533,10 +532,11 @@ vel_command_b = np.zeros(3)
 policy = torch.jit.load(args.policy_path)
 
 # Navigation_policy_params
-nav_policy = torch.jit.load(args.nav_policy_path)
+# nav_policy = torch.jit.load(args.nav_policy_path)
 prev_nav_action = None
 est_base_pos = None
 est_base_quat = None
+is_stop = False
 
 # Loggers
 slam_errors = np.zeros((1,1))
@@ -553,14 +553,14 @@ LAST_ITER = 8000
 # target_pos_w = np.array([0.5, 0., 0.0])
 # heading_target = math.pi/4
 
-target_pos_w = np.array([0.0, -1.0, 0.0])
+target_pos_w = np.array([1.0, 0.0, 0.0])
 heading_target = 0.
 
 SLOW_BOUND = 0.2
 MAX_LIN_VEL = 0.1
 MAX_ANG_VEL = 0.2
 NAV_HZ = 5
-ERROR_THRESHOLD = 0.03  # m
+ERROR_THRESHOLD = 0.03
 NUM_AVG = 10
 # =============================== Main iteration ===============================
 is_first_released = False
@@ -641,43 +641,54 @@ while simulation_app.is_running():
         
         # OPTION 1 : Determine the end at the last timestep.
         # if np.linalg.norm(pos_command_b[:2]) < 0.01 and heading_error[0] < 0.01:
-        #     current_iter = LAST_ITER
+        #     is_stop = True
+        #     current_iter = LAST_ITER - 500
 
         # OPTION 2 : Determine the end using windowed avg.
         if pos_command_bs.shape[0] > NUM_AVG:
-            print("AVG pos error : ", round(np.mean(pos_command_bs[-NUM_AVG:, :].reshape((NUM_AVG,))), 4))
-            print("AVG ori error : ", round(np.mean(np.abs(heading_error_bs[-NUM_AVG:, :]).reshape((NUM_AVG,))), 4))
+            if current_iter % 100:
+                print("AVG pos error : ", round(np.mean(pos_command_bs[-NUM_AVG:, :].reshape((NUM_AVG,))), 4))
+                print("AVG ori error : ", round(np.mean(np.abs(heading_error_bs[-NUM_AVG:, :]).reshape((NUM_AVG,))), 4))
             if np.mean(pos_command_bs[-NUM_AVG:, :].reshape((NUM_AVG,))) < ERROR_THRESHOLD \
                 and np.mean(np.abs(heading_error_bs[-NUM_AVG:, :]).reshape((NUM_AVG,))) < ERROR_THRESHOLD:
-                current_iter = LAST_ITER
+                if is_stop == False:
+                    current_iter = LAST_ITER - 100
+                is_stop = True
 
         # Navigation
         if current_iter % int(200/NAV_HZ):
             vel_command_b[:2] = np.clip(np.sign(pos_command_b[:2]) * MAX_LIN_VEL * np.sqrt(np.abs(pos_command_b[:2] / SLOW_BOUND)), -MAX_LIN_VEL, MAX_LIN_VEL)
             vel_command_b[2] = np.clip(np.sign(heading_error) * MAX_ANG_VEL * np.sqrt(np.abs(heading_error / SLOW_BOUND)), -MAX_ANG_VEL, MAX_ANG_VEL)
+            # vel_command_b[:2] = np.clip(np.sign(pos_command_b[:2]) * np.sqrt(np.abs(pos_command_b[:2] / SLOW_BOUND)), -MAX_LIN_VEL, MAX_LIN_VEL)
+            # vel_command_b[2] = np.clip(np.sign(heading_error)  * np.sqrt(np.abs(heading_error / SLOW_BOUND)), -MAX_ANG_VEL, MAX_ANG_VEL)
 
         if prev_action is None:
-            prev_action = np.zeros(29)
+            prev_action = np.zeros(15)
+
+        if is_stop:
+            vel_command_b = np.zeros(3)
+            phase = 0.0
+            sin_p, cos_p = np.sin(2*np.pi*phase), np.cos(2*np.pi*phase)
+
         obs = np.concatenate([
-            # angular_velocities,
             base_ang_vel_b,
             gravity_ori,
-            vel_command_b,
             qj_rel,
             # qj,
             dqj,
+            vel_command_b,
+            np.array([sin_p, cos_p]),
             prev_action,
-            np.array([sin_p, cos_p])
         ]).astype(np.float32)
 
         obs_tensor = torch.from_numpy(obs).unsqueeze(0)
 
         action = policy(obs_tensor).detach().numpy().squeeze()
 
-        joint_targets = g1.default_pos +(action * args.action_scale).copy()
+        joint_targets[g1.joint_indices] = (action * args.action_scale).copy()
         if fixed == True:
             joint_targets = np.zeros(29)
-            prev_action = np.zeros(29)
+            prev_action = np.zeros(15)
 
         prev_action = action.copy()
 

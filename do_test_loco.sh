@@ -67,3 +67,4 @@ echo "
     $TEST_TYPE \
     $NUM_ENVS $OTHER_ARGS
 
+# [walking_alive/standing_alive/velocity]
