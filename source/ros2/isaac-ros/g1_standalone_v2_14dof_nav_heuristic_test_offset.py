@@ -806,7 +806,7 @@ while simulation_app.is_running():
                 vel_command_b[0] = np.clip(-1.5 * MAX_LIN_VEL * np.sqrt(np.abs(pos_command_b[0] / SLOW_BOUND)), -MAX_LIN_VEL, 0.0)
             # Y > 0
             if pos_command_b[1] >= 0.:
-                vel_command_b[1] = np.clip(MAX_LIN_VEL * np.sqrt(np.abs(pos_command_b[1] / SLOW_BOUND)), 0.0, MAX_LIN_VEL)
+                vel_command_b[1] = np.clip(1.5 * MAX_LIN_VEL * np.sqrt(np.abs(pos_command_b[1] / SLOW_BOUND)), 0.0, MAX_LIN_VEL)
             # Y < 0
             if pos_command_b[1] < 0.:
                 vel_command_b[1] = np.clip(-MAX_LIN_VEL * np.sqrt(np.abs(pos_command_b[1] / SLOW_BOUND)), -MAX_LIN_VEL, 0.0)
