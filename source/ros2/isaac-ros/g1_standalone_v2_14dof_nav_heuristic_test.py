@@ -727,7 +727,7 @@ while simulation_app.is_running():
         task_translation_errors = np.vstack((task_translation_errors, np.linalg.norm(target_pos_w[:2] - midsole_pos_w[:2]).reshape((1,1))))
         task_orientation_errors = np.vstack((task_orientation_errors, np.linalg.norm(target_pos_w[:2] - midsole_pos_w[:2]).reshape((1,1))))
 
-        if task_translation_errors.shape[0] > NUM_AVG:
+        if pos_command_bs.shape[0] > NUM_AVG:
             # print("pos command mean : ", np.mean(pos_command_bs[-NUM_AVG:, :].reshape((NUM_AVG,))))
             # print("heading error mean : ", np.mean(np.abs(heading_error_bs[-NUM_AVG:, :]).reshape((NUM_AVG,))))
             if np.mean(task_translation_errors[-NUM_AVG:, :].reshape((NUM_AVG,))) < ERROR_THRESHOLD \
