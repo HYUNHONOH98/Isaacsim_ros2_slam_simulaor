@@ -691,7 +691,21 @@ while simulation_app.is_running():
         # Iterate over the target poses
         heading_target = target_pose_list[current_target_pose_idx][3].copy()
         target_pos_w = target_pose_list[current_target_pose_idx][:3].copy()
+
+        target_midsole_quat = yaw_quat(np.array([np.sin(heading_target/2), 0.0, 0.0, np.cos(heading_target/2)]).astype(np.float32)).astype(np.float32)
+
+        offset = quat_apply(target_midsole_quat, 
+                    np.array(
+                       [pelvis_to_midsole_offset_after_locomotion["x"], 
+                        pelvis_to_midsole_offset_after_locomotion["y"], 
+                        0.0]
+                        ).astype(np.float32)
+                    )
         
+        pelvis_target_pos_w = target_pos_w + offset
+        pelvis_heading_target = heading_target + pelvis_to_midsole_offset_after_locomotion["yaw"]
+
+
         is_first_released = False
         qj = np.array(av.get_joint_positions()[0])
         dqj = np.array(av.get_joint_velocities()[0])
@@ -701,8 +715,8 @@ while simulation_app.is_running():
         qj_rel = qj - g1.default_pos
         forward_w = quat_apply(est_pelvis_quat.astype(np.float32), np.array([1., 0., 0.]).astype(np.float32))
         heading_w = np.arctan2(forward_w[1], forward_w[0])
-        heading_error = wrap_to_pi(np.array([heading_target]).astype(np.float32) - np.array([heading_w]).astype(np.float32))
-        target_vec = target_pos_w - est_pelvis_pos
+        heading_error = wrap_to_pi(np.array([pelvis_heading_target]).astype(np.float32) - np.array([heading_w]).astype(np.float32))
+        target_vec = pelvis_target_pos_w - est_pelvis_pos
         target_vec[2] = 0.0
         pos_command_b = quat_rotate_inverse(yaw_quat(est_pelvis_quat).astype(np.float32), target_vec.astype(np.float32))
 
