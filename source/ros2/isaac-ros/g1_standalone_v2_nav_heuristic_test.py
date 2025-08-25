@@ -50,6 +50,9 @@ quat_apply = math_utils.as_np(
 wrap_to_pi = math_utils.as_np(
     math_utils.wrap_to_pi
 )
+yaw_quat = math_utils.as_np(
+    math_utils.yaw_quat
+)
 
 import rclpy
 
@@ -237,9 +240,11 @@ parser.add_argument("--map-path", type=str, default="/Isaac/Environments/Grid/de
 parser.add_argument("--physics_dt", type=float, default=1/200, help="Physics simulation time step")
 parser.add_argument("--rendering_dt", type=float, default=1/100, help="Rendering time step")
 # Policy parameters
-parser.add_argument("--policy-path", type=str, default="/workspace/isaaclab/source/ros2/isaac-ros/assets/weights/eetrack/ckp_5000.pt", help="Path to the policy file")
+# parser.add_argument("--policy-path", type=str, default="source/ros2/isaac-ros/assets/0818_f3/exported/policy.pt", help="Path to the policy file")
+parser.add_argument("--policy-path", type=str, default="source/ros2/isaac-ros/assets/0820_f5/exported/policy.pt", help="Path to the policy file")
+parser.add_argument("--nav-policy-path", type=str, default="/workspace/isaaclab/source/ros2/isaac-ros/assets/weights/navigation/navigation_policy_0623.pt", help="Path to the policy file")
 parser.add_argument("--action-scale", type=float, default=0.5, help="Scale for the action commands")
-parser.add_argument("--period", type=float, default=1.0, help="Phase command period")
+parser.add_argument("--period", type=float, default=0.8, help="Phase command period")
 
 args = parser.parse_args()
 
@@ -256,7 +261,7 @@ my_world.scene.add_default_ground_plane(
             prim_path="/World/defaultGroundPlane",
             static_friction=2.0,
             dynamic_friction=2.0,
-            restitution=1.0,
+            restitution=0.01,
 )
 
 from pxr import Usd, UsdGeom, UsdPhysics, Sdf, Gf
@@ -366,7 +371,7 @@ g1 = G1(
     prim_path="/World/g1",
     name="g1",
     usd_path= args.usd_path,
-    position=np.array([0, 0, 0.85]),
+    position=np.array([0, 0, 0.80]),
 )
 
 # =============================== LiDAR sensor ===============================
@@ -382,6 +387,20 @@ imu_sensor = my_world.scene.add(
     )
 )
 simulation_app.update()
+
+
+# imu_prim_path = "/World/g1/pelvis/imu_sensor"
+# imu_sensor = my_world.scene.add(
+#     IMUSensor(
+#         prim_path=imu_prim_path,
+#         name="imu",
+#         dt=1/200,
+#         linear_acceleration_filter_size = 1,
+#         angular_velocity_filter_size = 1,
+#         orientation_filter_size = 1,
+#     )
+# )
+# simulation_app.update()
 
 
 # =============================== LiDAR sensor ===============================
@@ -434,6 +453,7 @@ fixed = True
 import numpy as np
 from pxr import Gf
 from omni.isaac.core.prims import XFormPrimView
+import os
 
 path = "/World/g1/torso_link/mid360_link"
 xform_view = XFormPrimView(prim_paths_expr=path, name="mid360_xform_view")
@@ -482,12 +502,12 @@ def read_velocity(dt):
     prev_p, prev_q = p, q
     return v_lin, v_ang
 # ===========================================================
-# physics_context = sim_context.get_physics_context()
-# physics_context.set_broadphase_type("GPU")
-# physics_context.enable_gpu_dynamics(True)
-# physics_context.set_bounce_threshold(0.5)
-# physics_context.enable_ccd(False)
-# physics_context.set_physx_update_transformations_settings(True, False, False)
+physics_context = sim_context.get_physics_context()
+physics_context.set_broadphase_type("GPU")
+physics_context.enable_gpu_dynamics(True)
+physics_context.set_bounce_threshold(0.5)
+physics_context.enable_ccd(False)
+physics_context.set_physx_update_transformations_settings(True, False, False)
 
 sim_context.play()
 joint_targets = np.zeros(29)  # 29 dof
@@ -500,6 +520,10 @@ odom_pub_node = OdomPublisher()
 nodes.append(odom_pub_node)
 lidar_node = PointCloudPublisher()
 nodes.append(lidar_node)
+slam_node = SlamSubscriber()
+nodes.append(slam_node)
+lidar_tf_node = LidarTFPublisher()
+nodes.append(lidar_tf_node)
 
 # =============================== Parameters ===============================
 lidar_iter = 0
@@ -521,16 +545,59 @@ lidar_ang_jitters = np.zeros((1,1))
 vel_command_b = np.zeros(3)
 policy = torch.jit.load(args.policy_path)
 
+# Navigation_policy_params
+nav_policy = torch.jit.load(args.nav_policy_path)
+prev_nav_action = None
+est_base_pos = None
+est_base_quat = None
+
+# Loggers
+slam_errors = np.zeros((1,1))
+pos_command_bs = np.zeros((1,1))
+gt_errors = np.zeros((1,1))
+heading_error_bs = np.zeros((1,1))
+
 # =============================== Hyper-parameters ===============================
 free_iter = 2000
 
-heading_target = 0.0
 # heading_target = -math.pi
-vel_command_b[0] = 0.1
-# stop_iter = 4000
-# LAST_ITER = 5000 + 2000
-LAST_ITER = 5000
+LAST_ITER = 30000
 
+# target_pos_w = np.array([0.5, 0., 0.0])
+# heading_target = math.pi/4
+
+target_pose_list = np.array([
+    # go forward
+    [1.0, 0.0, 0.0, 0.0],
+    # go backward
+    [0.0, 0.0, 0.0, 0.0],
+    # go left
+    [0.0, 1.0, 0.0, 0.0],
+    # go right
+    [0.0, 0.0, 0.0, 0.0],
+    # turn left
+    [0.0, 0.0, 0.0, math.pi/2],
+    # turn right
+    [0.0, 0.0, 0.0, 0.0],
+])
+errors_per_pose = {
+    0: ("go forward", []),
+    1: ("go backward", []),
+    2: ("go left", []),
+    3: ("go right", []),
+    4: ("turn left", []),
+    5: ("turn right", []),
+}
+current_target_pose_idx = 0
+time_per_pose = 4000
+stop_counter = 0
+
+SLOW_BOUND = 0.4
+MAX_LIN_VEL = 0.3
+MAX_ANG_VEL = 0.3
+NAV_HZ = 5
+ERROR_THRESHOLD = 0.02  # m
+NUM_AVG = 70
 # =============================== Main iteration ===============================
 is_first_released = False
 print_simtime = 0
@@ -563,10 +630,10 @@ while simulation_app.is_running():
             lidar_lin_acc = (lidar_lin_vel - prev_lidar_lin_vel) / dt
             lidar_ang_acc = (lidar_ang_vel - prev_lidar_ang_vel) / dt
 
-            lidar_lin_accs = np.vstack([lidar_lin_accs, np.linalg.norm(lidar_lin_acc).reshape((1,1))])
-            lidar_ang_accs = np.vstack([lidar_ang_accs, np.linalg.norm(lidar_ang_acc).reshape((1,1))])
-            lidar_lin_vels = np.vstack([lidar_lin_vels, np.linalg.norm(lidar_lin_vel).reshape((1,1))])
-            lidar_ang_vels = np.vstack([lidar_ang_vels, np.linalg.norm(lidar_ang_vel).reshape((1,1))])
+            lidar_lin_accs = np.vstack([lidar_lin_accs, np.linalg.norm(lidar_lin_acc, ord=2).reshape((1,1))])
+            lidar_ang_accs = np.vstack([lidar_ang_accs, np.linalg.norm(lidar_ang_acc, ord=2).reshape((1,1))])
+            lidar_lin_vels = np.vstack([lidar_lin_vels, np.linalg.norm(lidar_lin_vel, ord=2).reshape((1,1))])
+            lidar_ang_vels = np.vstack([lidar_ang_vels, np.linalg.norm(lidar_ang_vel, ord=2).reshape((1,1))])
 
             if prev_lidar_lin_acc is not None:
                 lidar_lin_jitter = (lidar_lin_acc - prev_lidar_lin_acc) / dt
@@ -581,33 +648,81 @@ while simulation_app.is_running():
         prev_lidar_ang_vel = lidar_ang_vel.copy()
 
     # imu rate 50Hz
+    if ( current_iter % 4 == 0 or is_first_released ) and est_base_pos is not None and est_base_quat is not None:
+        # Iterate over the target poses
+        heading_target = target_pose_list[current_target_pose_idx][3]
+        target_pos_w = target_pose_list[current_target_pose_idx][:3]
 
-    if current_iter % 4 == 0 or is_first_released :
         is_first_released = False
-        base_ang_vel_b = quat_rotate_inverse(base_quat.astype(np.float32), angular_velocities)
         qj = np.array(av.get_joint_positions()[0])
         dqj = np.array(av.get_joint_velocities()[0])
         phase = (simtime % args.period) / args.period
         sin_p, cos_p = np.sin(2*np.pi*phase), np.cos(2*np.pi*phase)
 
         qj_rel = qj - g1.default_pos
-        forward_w = quat_apply(base_quat.astype(np.float32), np.array([1., 0., 0.]).astype(np.float32))
+        forward_w = quat_apply(est_base_quat.astype(np.float32), np.array([1., 0., 0.]).astype(np.float32))
         heading_w = np.arctan2(forward_w[1], forward_w[0])
         heading_error = wrap_to_pi(np.array([heading_target]).astype(np.float32) - np.array([heading_w]).astype(np.float32))
-        vel_command_b[2] = np.clip(
-            heading_error[0],
-            -1.0,
-            1.0,
-        )
+        target_vec = target_pos_w - est_base_pos
+        target_vec[2] = 0.0
+        pos_command_b = quat_rotate_inverse(yaw_quat(est_base_quat).astype(np.float32), target_vec.astype(np.float32))
+
+
         
-        # if stop_iter >  current_iter:
-        #     vel_command_b = np.zeros(3)
-        #     phase = 0
-        #     sin_p, cos_p = np.sin(2*np.pi*phase), np.cos(2*np.pi*phase)
-            
-        # if current_iter > stop_iter:
-        #     vel_command_b[0] = 0.1
+        # pos_command_b[2]
+        pos_command = np.concatenate([pos_command_b, heading_error])
+
+        base_ang_vel_b = quat_rotate_inverse(base_quat.astype(np.float32), angular_velocities)
+        heading_error_bs = np.vstack((heading_error_bs, heading_error.reshape(1,1)))
+        slam_errors = np.vstack((slam_errors, np.linalg.norm(base_pos[:2] - est_base_pos[:2]).reshape((1,1))))
+        pos_command_bs = np.vstack((pos_command_bs, np.linalg.norm(pos_command_b[:2]).reshape((1,1))))
         
+        gt_errors = np.vstack((gt_errors, np.linalg.norm(target_pos_w[:2] - base_pos[:2]).reshape((1,1))))
+
+        if pos_command_bs.shape[0] > NUM_AVG:
+            # print("pos command mean : ", np.mean(pos_command_bs[-NUM_AVG:, :].reshape((NUM_AVG,))))
+            # print("heading error mean : ", np.mean(np.abs(heading_error_bs[-NUM_AVG:, :]).reshape((NUM_AVG,))))
+            if np.mean(pos_command_bs[-NUM_AVG:, :].reshape((NUM_AVG,))) < ERROR_THRESHOLD \
+                and np.mean(np.abs(heading_error_bs[-NUM_AVG:, :]).reshape((NUM_AVG,))) < 0.05 \
+                and errors_per_pose[current_target_pose_idx][1] == [] \
+                and stop_counter <= 0:
+                print(f"========= {errors_per_pose[current_target_pose_idx][0]} completed =========")
+                pos_error = round(np.linalg.norm(base_pos[:2] - target_pos_w[:2]), 4)
+                ori_error = round(np.abs(heading_error[0]), 4)
+                print("pos error : ", pos_error)
+                print("ori error : ", ori_error)
+                print("===========================================")
+                errors_per_pose[current_target_pose_idx][1].append(pos_error)
+                errors_per_pose[current_target_pose_idx][1].append(ori_error)
+                time_per_pose = 0
+                stop_counter = 100
+                # pos_command_bs = np.zeros((1,1))
+                # heading_error_bs = np.zeros((1,1))
+
+        if stop_counter > 0:
+            stop_counter -= 1
+            vel_command_b = np.zeros(3)
+            phase = 0.0
+            sin_p, cos_p = 0.0, 1.0
+
+            pos_error = round(np.linalg.norm(base_pos[:2] - target_pos_w[:2]), 4)
+            ori_error = round(np.abs(heading_error[0]), 4)
+            errors_per_pose[current_target_pose_idx][1][0] = pos_error
+            errors_per_pose[current_target_pose_idx][1][1] = ori_error
+            pos_command_bs = np.zeros((1,1))
+            heading_error_bs = np.zeros((1,1))
+
+        if time_per_pose <= 0 and stop_counter <= 0:
+            time_per_pose = 2000
+            current_target_pose_idx += 1
+            if current_target_pose_idx >= len(target_pose_list):
+                current_iter = LAST_ITER
+        time_per_pose -= 1
+
+        # Navigation
+        if current_iter % int(200/NAV_HZ):
+            vel_command_b[:2] = np.clip(np.sign(pos_command_b[:2]) * MAX_LIN_VEL * np.sqrt(np.abs(pos_command_b[:2] / SLOW_BOUND)), -MAX_LIN_VEL, MAX_LIN_VEL)
+            vel_command_b[2] = np.clip(np.sign(heading_error) * MAX_ANG_VEL * np.sqrt(np.abs(heading_error / SLOW_BOUND)), -MAX_ANG_VEL, MAX_ANG_VEL)
 
         if prev_action is None:
             prev_action = np.zeros(15)
@@ -627,11 +742,11 @@ while simulation_app.is_running():
         action = policy(obs_tensor).detach().numpy().squeeze()
 
         joint_targets[g1.joint_indices] = (action * args.action_scale).copy()
-        prev_action[:] = action.copy()
-
         if fixed == True:
             joint_targets = np.zeros(29)
             prev_action = np.zeros(15)
+
+        prev_action = action.copy()
 
 
     # joint position target is set synchronized with physics dt (200Hz)
@@ -641,20 +756,22 @@ while simulation_app.is_running():
     # imu rate 200Hz
     imu_pub_node.publish_imu(imu_sensor.get_current_frame(read_gravity=True), simtime=simtime)
     odom_pub_node.publish_odometry(base_pos, base_quat, linear_velocities, angular_velocities, simtime=simtime)
-    
+    lidar_pos, lidar_quat = xform_view.get_world_poses()
+    lidar_tf_node.publish_tf(lidar_pos[0], lidar_quat[0], base_pos, base_quat, simtime)
+    est_base_pos, est_base_quat = slam_node.subscribe_est_base_pose()
+
     current_iter += 1
     # Physics rate 200Hz
     my_world.step(render=False)
 
-    
     # Rendering rate 100Hz -> render_iter = 2
     if current_iter % render_iter == 0 :
         my_world.render()
     # scan rate 10Hz
     if current_iter % lidar_iter == 0: 
         lidar_node.publish_from_dict(annotator.get_data(), frame_id="lidar_sensor", scan_rate = lidar_scan_rate, simtime=simtime)
-        
-    if current_iter == LAST_ITER:
+
+    if current_iter >= LAST_ITER:
         print("====== ACC ======")
         print(
             "lidar lin acc mean:",
@@ -683,7 +800,7 @@ while simulation_app.is_running():
             "std:",
             np.round(np.std(lidar_ang_vels, axis=0), 4)
         )
-        print("lidar lin vel xy mean :", np.round(np.max(lidar_lin_vels, axis=0), 4))
+        print("lidar lin vel max:", np.round(np.max(lidar_lin_vels, axis=0), 4))
         print("lidar ang vel max:", np.round(np.max(lidar_ang_vels, axis=0), 4))
         print("====== JITTER ======")
         print(
@@ -700,6 +817,38 @@ while simulation_app.is_running():
         )
         print("lidar lin jitter max:", np.round(np.max(lidar_lin_jitters, axis=0), 4))
         print("lidar ang jitter max:", np.round(np.max(lidar_ang_jitters, axis=0), 4))
+
+        print("====== NAVIGATION ERROR ======")
+        # final_xy_pos_error = np.linalg.norm(base_pos[:2] - target_pos_w[:2])
+        # final_orientation_error = np.abs(heading_error)
+        # print("final_xy_pos_error : ", round(final_xy_pos_error, 4))
+        # print("final_orientation_error : ", round(final_orientation_error[0], 4))
+        for idx, (pose_name, errors) in errors_per_pose.items():
+            if errors:
+                print(f"{pose_name} \n - XY Error: {round(errors[0], 4)} \n - Orientation Error: {round(errors[1], 4)}")
+            else:
+                print(f"{pose_name} - Not completed yet.")
+
+        import matplotlib.pyplot as plt
+
+        # Create directory if it doesn't exist
+        log_dir = os.path.join(os.path.dirname(__file__), "g1_data", "exp_log")
+        os.makedirs(log_dir, exist_ok=True)
+
+        # Plot both slam_errors and pos_command_bs together
+        plt.figure()
+        # plt.ylim(0, 0.2)
+        plt.plot(slam_errors, label="GT pos <> Est pos Error (SLAM error)")
+        plt.plot(pos_command_bs, label="Target pos <> Est pos Error")
+        plt.plot(gt_errors, label="Target pos <> GT pos Error")
+        plt.xlabel("Step")
+        plt.ylabel("Value")
+        plt.title("Errors Over Time")
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(os.path.join(log_dir, "errors.png"))
+        plt.close()
+
         simulation_app.close()
                 
         for node in nodes:

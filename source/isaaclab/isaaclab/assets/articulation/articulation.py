@@ -897,6 +897,10 @@ class Articulation(AssetBase):
             env_ids = slice(None)
         if joint_ids is None:
             joint_ids = slice(None)
+        # else:
+        #     joint_ids = torch.tensor(joint_ids, dtype=torch.long, device=self.device)
+        #     mask = ~torch.isin(torch.arange(self.data.default_joint_pos.shape[1], device=self.device), joint_ids)
+        #     self._data.joint_pos_target[env_ids, mask] = self.data.default_joint_pos[env_ids, mask]
         # broadcast env_ids if needed to allow double indexing
         if env_ids != slice(None) and joint_ids != slice(None):
             env_ids = env_ids[:, None]

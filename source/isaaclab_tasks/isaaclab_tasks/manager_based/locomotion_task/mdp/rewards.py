@@ -991,6 +991,47 @@ def body_ang_vel_xy_l2(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = Scene
     return th.sum(th.square(body_ang_vel_b[:, :2]), dim=1)
 
 
+def penalize_foot_force(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg = SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link"),
+    force_threshold: float = 400.0,
+):
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    feet_forces = th.norm(contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, :], dim=-1)
+    forces_over_threshold_mask = feet_forces > force_threshold  # (N, 2)
+
+    rew = th.sum(forces_over_threshold_mask.float(), dim=-1)
+    return rew
+
+
+def penalize_torso_ang_acc_z_l2(
+    env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+) -> th.Tensor:
+    """Penalize xy-axis base angular velocity using L2 squared kernel."""
+    # extract the used quantities (to enable type-hinting)
+    asset: RigidObject = env.scene[asset_cfg.name]
+    torso_id = asset.find_bodies("torso_link")[0][0]
+    quat_w = asset.data.body_quat_w[:, torso_id, :]
+    ang_acc_w = asset.data.body_ang_acc_w[:, torso_id, :]
+    ang_acc_b = quat_rotate_inverse(quat_w, ang_acc_w)
+
+    # ic(th.sum(th.square(ang_acc_b[:, 2:]), dim=1))
+    return th.sum(th.square(ang_acc_b[:, 2:]), dim=1)
+
+
+def penalize_feet_z_force(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg = SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link"),
+    threshold: float = 400.0,
+):
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    feet_forces = th.abs(contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, 2] - threshold)
+
+    ic(feet_forces)
+    feet_forces_over_threshold = th.clamp(feet_forces, min=0.0)
+    
+    return th.sum(feet_forces_over_threshold, dim=-1)
+
 # def straight_support_leg(
 #     env: ManagerBasedRLEnv,
 #     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
@@ -1350,5 +1391,30 @@ class G1LocomotionRewards:
             "asset_cfg": SceneEntityCfg("robot"),
             "lidar_frame_name": "mid360_link_frame",
             "std": 2,
+        },
+    )
+
+    penalize_foot_force = RewTerm(
+        func=penalize_foot_force,
+        weight= -2.5e-4,
+        params={
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link"),
+            "force_threshold": 400.0,
+        },
+    )
+
+
+    penalize_torso_ang_acc_z_l2 = RewTerm(
+        func=penalize_torso_ang_acc_z_l2,
+        weight=-0.05,
+        params={"asset_cfg": SceneEntityCfg("robot", body_names="torso_link")},
+    )
+
+    penalize_feet_z_force = RewTerm(
+        func=penalize_feet_z_force,
+        weight=-2.5e-4,
+        params={
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link"),
+            "threshold": 400.0,
         },
     )

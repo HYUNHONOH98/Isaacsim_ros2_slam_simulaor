@@ -84,7 +84,7 @@ class AnalysisNode(Node):
             self.get_logger().info(f"XY error mean: {mean_xy:.6f}, std: {std_xy:.6f}")
 
             # if len(self.gt_xyz) == 780:
-            if len(self.gt_xyz) == 480:
+            if len(self.gt_xyz) == 1000:
                 import matplotlib.pyplot as plt
                 xy_error_norm = np.linalg.norm(diff_xy, axis=1)
                 plt.figure()
@@ -94,7 +94,7 @@ class AnalysisNode(Node):
                 plt.ylabel("XY Error Norm (meters)")
                 plt.grid(True)
 
-                plt.savefig(f"g1_data/exp_log/default.png")
+                plt.savefig(f"g1_data/exp_log/slam_error.png")
                 print("FIGURE SAVED")
 
 def main():

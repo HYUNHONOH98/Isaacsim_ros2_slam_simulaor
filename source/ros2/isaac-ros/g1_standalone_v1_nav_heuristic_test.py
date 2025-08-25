@@ -580,7 +580,7 @@ time_per_pose = 2000
 
 SLOW_BOUND = 0.4
 MAX_LIN_VEL = 0.2
-MAX_ANG_VEL = 0.2
+MAX_ANG_VEL = 0.4
 NAV_HZ = 5
 ERROR_THRESHOLD = 0.03  # m
 NUM_AVG = 70
@@ -800,7 +800,7 @@ while simulation_app.is_running():
         # print("final_orientation_error : ", round(final_orientation_error[0], 4))
         for idx, (pose_name, errors) in errors_per_pose.items():
             if errors:
-                print(f"{pose_name} \n - XY Error: {errors[0]} \n - Orientation Error: {errors[1]}")
+                print(f"{pose_name} \n - XY Error: {round(errors[0], 4)} \n - Orientation Error: {round(errors[1], 4)}")
             else:
                 print(f"{pose_name} - Not completed yet.")
 

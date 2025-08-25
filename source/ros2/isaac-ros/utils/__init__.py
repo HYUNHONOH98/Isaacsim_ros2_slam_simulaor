@@ -17,3 +17,5 @@ from .lidar_node import *
 from .slam_subscribe_node import *
 
 from .lidar_tf_node import *
+
+from .midsole_tf_node import *

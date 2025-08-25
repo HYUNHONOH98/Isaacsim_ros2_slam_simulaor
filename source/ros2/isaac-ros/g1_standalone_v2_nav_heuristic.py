@@ -638,13 +638,7 @@ while simulation_app.is_running():
         pos_command_bs = np.vstack((pos_command_bs, np.linalg.norm(pos_command_b[:2]).reshape((1,1))))
         
         gt_errors = np.vstack((gt_errors, np.linalg.norm(target_pos_w[:2] - base_pos[:2]).reshape((1,1))))
-        
-        # OPTION 1 : Determine the end at the last timestep.
-        # if np.linalg.norm(pos_command_b[:2]) < 0.01 and heading_error[0] < 0.01:
-        #     is_stop = True
-        #     current_iter = LAST_ITER - 500
 
-        # OPTION 2 : Determine the end using windowed avg.
         if pos_command_bs.shape[0] > NUM_AVG:
             if current_iter % 100:
                 print("AVG pos error : ", round(np.mean(pos_command_bs[-NUM_AVG:, :].reshape((NUM_AVG,))), 4))
@@ -659,8 +653,6 @@ while simulation_app.is_running():
         if current_iter % int(200/NAV_HZ):
             vel_command_b[:2] = np.clip(np.sign(pos_command_b[:2]) * MAX_LIN_VEL * np.sqrt(np.abs(pos_command_b[:2] / SLOW_BOUND)), -MAX_LIN_VEL, MAX_LIN_VEL)
             vel_command_b[2] = np.clip(np.sign(heading_error) * MAX_ANG_VEL * np.sqrt(np.abs(heading_error / SLOW_BOUND)), -MAX_ANG_VEL, MAX_ANG_VEL)
-            # vel_command_b[:2] = np.clip(np.sign(pos_command_b[:2]) * np.sqrt(np.abs(pos_command_b[:2] / SLOW_BOUND)), -MAX_LIN_VEL, MAX_LIN_VEL)
-            # vel_command_b[2] = np.clip(np.sign(heading_error)  * np.sqrt(np.abs(heading_error / SLOW_BOUND)), -MAX_ANG_VEL, MAX_ANG_VEL)
 
         if prev_action is None:
             prev_action = np.zeros(15)

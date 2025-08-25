@@ -186,7 +186,7 @@ class G1:
         self.joint_indices = []
         for joint_seq in [
             'left_hip_pitch_joint', 'right_hip_pitch_joint',
-            'waist_yaw_joint',
+            # 'waist_yaw_joint',
             'left_hip_roll_joint', 'right_hip_roll_joint',
             'waist_roll_joint',
             'left_hip_yaw_joint', 'right_hip_yaw_joint',
@@ -366,7 +366,7 @@ g1 = G1(
     prim_path="/World/g1",
     name="g1",
     usd_path= args.usd_path,
-    position=np.array([0, 0, 0.85]),
+    position=np.array([0, 0, 0.80]),
 )
 
 # =============================== LiDAR sensor ===============================
@@ -610,7 +610,7 @@ while simulation_app.is_running():
         
 
         if prev_action is None:
-            prev_action = np.zeros(15)
+            prev_action = np.zeros(14)
         obs = np.concatenate([
             base_ang_vel_b,
             gravity_ori,
@@ -631,7 +631,7 @@ while simulation_app.is_running():
 
         if fixed == True:
             joint_targets = np.zeros(29)
-            prev_action = np.zeros(15)
+            prev_action = np.zeros(14)
 
 
     # joint position target is set synchronized with physics dt (200Hz)

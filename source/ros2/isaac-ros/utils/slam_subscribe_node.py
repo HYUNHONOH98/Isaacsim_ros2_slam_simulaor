@@ -42,6 +42,50 @@ class SlamSubscriber(Node):
                 est_tf.transform.rotation.z,
             ])
         return est_xyz, est_quat
+    
+    def subscribe_est_midsole_pose(self):
+        # Cancel the timer so this callback runs only one time.
+        try:
+            est_tf : TransformStamped = self.tf_buffer.lookup_transform(
+                "odom", "est_midsole", rclpy.time.Time()
+            )
+        except:
+            self.get_logger().info("SLAM is not initialized yet.")
+            return None, None
+        est_xyz = np.array([   
+                est_tf.transform.translation.x,
+                est_tf.transform.translation.y,
+                est_tf.transform.translation.z,
+            ])
+        est_quat = np.array([
+                est_tf.transform.rotation.w,
+                est_tf.transform.rotation.x,
+                est_tf.transform.rotation.y,
+                est_tf.transform.rotation.z,
+            ])
+        return est_xyz, est_quat
+
+    def subscribe_est_lidar_pose(self):
+        # Cancel the timer so this callback runs only one time.
+        try:
+            est_tf : TransformStamped = self.tf_buffer.lookup_transform(
+                "odom", "body", rclpy.time.Time()
+            )
+        except:
+            self.get_logger().info("SLAM is not initialized yet.")
+            return None, None
+        est_xyz = np.array([   
+                est_tf.transform.translation.x,
+                est_tf.transform.translation.y,
+                est_tf.transform.translation.z,
+            ])
+        est_quat = np.array([
+                est_tf.transform.rotation.w,
+                est_tf.transform.rotation.x,
+                est_tf.transform.rotation.y,
+                est_tf.transform.rotation.z,
+            ])
+        return est_xyz, est_quat
 
 def main():
     rclpy.init()

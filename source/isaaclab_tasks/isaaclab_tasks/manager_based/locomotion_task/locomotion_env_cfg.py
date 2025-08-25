@@ -161,7 +161,9 @@ class ActionsCfg:
     joint_pos = mdp.JointPositionActionCfg(
         asset_name="robot",
         joint_names=[
-            "waist_.*_joint",  # NOTE(HH) include or not?
+            # "waist_.*_joint",  # NOTE(HH) include or not?
+            "waist_roll_joint",  # NOTE(HH) include or not?
+            "waist_pitch_joint",  # NOTE(HH) include or not?
             ".*_ankle_roll_joint",
             ".*_ankle_pitch_joint",
             ".*_hip_pitch_joint",
@@ -426,10 +428,10 @@ class G1LocomotionEnvCfg_PLAY(G1LocomotionEnvCfg):
 
         # set command for play.
 
-        self.commands.base_velocity.ranges.lin_vel_x = (0.3, 0.3)
-        # self.commands.base_velocity.ranges.lin_vel_y = (0.3, 0.3)
+        # self.commands.base_velocity.ranges.lin_vel_x = (0.1, 0.1)
+        # self.commands.base_velocity.ranges.lin_vel_y = (0.5, 0.5)
         # self.commands.base_velocity.ranges.ang_vel_z = (1., 1.)
-        # self.commands.base_velocity.ranges.lin_vel_x = (0.0, 0.0)
+        self.commands.base_velocity.ranges.lin_vel_x = (0.0, 0.0)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
         self.commands.base_velocity.ranges.ang_vel_z = (-1.0, 1.0)
 
@@ -443,6 +445,7 @@ class G1LocomotionEnvCfg_PLAY(G1LocomotionEnvCfg):
         self.events.reset_base.params["pose_range"] = {"x": (-0.0, 0.0), "y": (-0.0, 0.0), "yaw": (-0.0, 0.0)}
 
         # fix cam
-        self.viewer.eye = (0.0, 3.0, 0.4)
+        # self.viewer.eye = (0.0, 3.0, 0.4)
+        self.viewer.eye = (3.0, 0.0, 0.4)
         self.viewer.origin_type = "asset_root"
         self.viewer.asset_name = "robot"
