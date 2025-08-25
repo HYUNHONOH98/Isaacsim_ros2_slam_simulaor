@@ -582,6 +582,8 @@ est_pelvis_quat = None
 slam_errors = np.zeros((1,1))
 pos_command_bs = np.zeros((1,1))
 task_translation_errors = np.zeros((1,1))
+task_x_errors = np.zeros((1,1))
+task_y_errors = np.zeros((1,1))
 task_orientation_errors = np.zeros((1,1))
 heading_error_bs = np.zeros((1,1))
 midsole_diffs = []
@@ -692,7 +694,7 @@ while simulation_app.is_running():
         heading_target = target_pose_list[current_target_pose_idx][3].copy()
         target_pos_w = target_pose_list[current_target_pose_idx][:3].copy()
 
-        target_midsole_quat = yaw_quat(np.array([np.sin(heading_target/2), 0.0, 0.0, np.cos(heading_target/2)]).astype(np.float32)).astype(np.float32)
+        target_midsole_quat = np.array([np.cos(heading_target/2), 0.0, 0.0, np.sin(heading_target/2)]).astype(np.float32)
 
         offset = quat_apply(target_midsole_quat, 
                     np.array(
@@ -701,6 +703,7 @@ while simulation_app.is_running():
                         0.0]
                         ).astype(np.float32)
                     )
+        # print("offset : ", offset)
         
         pelvis_target_pos_w = target_pos_w + offset
         pelvis_heading_target = heading_target + pelvis_to_midsole_offset_after_locomotion["yaw"]
@@ -739,7 +742,12 @@ while simulation_app.is_running():
         pos_command_bs = np.vstack((pos_command_bs, np.linalg.norm(pos_command_b[:2]).reshape((1,1))))
         
         task_translation_errors = np.vstack((task_translation_errors, np.linalg.norm(target_pos_w[:2] - midsole_pos_w[:2]).reshape((1,1))))
-        task_orientation_errors = np.vstack((task_orientation_errors, np.abs(heading_error).reshape((1,1))))
+        task_x_errors = np.vstack((task_x_errors, np.array(target_pos_w[0] - midsole_pos_w[0]).reshape((1,1))))
+        task_y_errors = np.vstack((task_y_errors, np.array(target_pos_w[1] - midsole_pos_w[1]).reshape((1,1))))
+        midsole_forward_w = quat_apply(midsole_quat_w.astype(np.float32), np.array([1., 0., 0.]).astype(np.float32))
+        midsole_heading_w = np.arctan2(forward_w[1], forward_w[0])
+        midsole_heading_error = wrap_to_pi(np.array([heading_target]).astype(np.float32) - np.array([heading_w]).astype(np.float32))
+        task_orientation_errors = np.vstack((task_orientation_errors, np.abs(midsole_heading_error).reshape((1,1))))
 
         if pos_command_bs.shape[0] > NUM_AVG:
             # print("pos command mean : ", np.mean(pos_command_bs[-NUM_AVG:, :].reshape((NUM_AVG,))))
@@ -750,12 +758,16 @@ while simulation_app.is_running():
                 and stop_counter <= 0:
                 print(f"========= {errors_per_pose[current_target_pose_idx][0]} completed =========")
                 pos_error = round(task_translation_errors[-1][0], 4)
-                ori_error = round(np.abs(task_orientation_errors[-1][0]), 4)
-                print("pos error : ", pos_error)
+                ori_error = round(task_orientation_errors[-1][0], 4)
+                print("pos L2 error : ", pos_error)
+                print("x error : ", round(task_x_errors[-1][0], 4))
+                print("y error : ", round(task_y_errors[-1][0], 4))
                 print("ori error : ", ori_error)
                 print("===========================================")
                 errors_per_pose[current_target_pose_idx][1].append(pos_error)
                 errors_per_pose[current_target_pose_idx][1].append(ori_error)
+                errors_per_pose[current_target_pose_idx][1].append(round(task_x_errors[-1][0], 4))
+                errors_per_pose[current_target_pose_idx][1].append(round(task_y_errors[-1][0], 4))
                 time_per_pose = 0
                 stop_counter = 100
                 # pos_command_bs = np.zeros((1,1))
@@ -768,9 +780,11 @@ while simulation_app.is_running():
             sin_p, cos_p = 0.0, 1.0
 
             pos_error = round(task_translation_errors[-1][0], 4)
-            ori_error = round(np.abs(task_orientation_errors[-1][0]), 4)
+            ori_error = round(task_orientation_errors[-1][0], 4)
             errors_per_pose[current_target_pose_idx][1][0] = pos_error
             errors_per_pose[current_target_pose_idx][1][1] = ori_error
+            errors_per_pose[current_target_pose_idx][1][2] = round(task_x_errors[-1][0], 4)
+            errors_per_pose[current_target_pose_idx][1][3] = round(task_y_errors[-1][0], 4)
             pos_command_bs = np.zeros((1,1))
             heading_error_bs = np.zeros((1,1))
 
@@ -783,7 +797,20 @@ while simulation_app.is_running():
 
         # Navigation
         if current_iter % int(200/NAV_HZ):
-            vel_command_b[:2] = np.clip(np.sign(pos_command_b[:2]) * MAX_LIN_VEL * np.sqrt(np.abs(pos_command_b[:2] / SLOW_BOUND)), -MAX_LIN_VEL, MAX_LIN_VEL)
+            # vel_command_b[:2] = np.clip(np.sign(pos_command_b[:2]) * MAX_LIN_VEL * np.sqrt(np.abs(pos_command_b[:2] / SLOW_BOUND)), -MAX_LIN_VEL, MAX_LIN_VEL)
+            # X > 0
+            if pos_command_b[0] >= 0.:
+                vel_command_b[0] = np.clip(MAX_LIN_VEL * np.sqrt(np.abs(pos_command_b[0] / SLOW_BOUND)), 0.0, MAX_LIN_VEL)
+            # X < 0
+            if pos_command_b[0] < 0.:
+                vel_command_b[0] = np.clip(-1.5 * MAX_LIN_VEL * np.sqrt(np.abs(pos_command_b[0] / SLOW_BOUND)), -MAX_LIN_VEL, 0.0)
+            # Y > 0
+            if pos_command_b[1] >= 0.:
+                vel_command_b[1] = np.clip(MAX_LIN_VEL * np.sqrt(np.abs(pos_command_b[1] / SLOW_BOUND)), 0.0, MAX_LIN_VEL)
+            # Y < 0
+            if pos_command_b[1] < 0.:
+                vel_command_b[1] = np.clip(-MAX_LIN_VEL * np.sqrt(np.abs(pos_command_b[1] / SLOW_BOUND)), -MAX_LIN_VEL, 0.0)
+            
             vel_command_b[2] = np.clip(np.sign(heading_error) * MAX_ANG_VEL * np.sqrt(np.abs(heading_error / SLOW_BOUND)), -MAX_ANG_VEL, MAX_ANG_VEL)
 
         if prev_action is None:
@@ -898,6 +925,8 @@ while simulation_app.is_running():
         for idx, (pose_name, errors) in errors_per_pose.items():
             if errors:
                 print(f"{pose_name} \n - XY Error: {round(errors[0], 4)} \n - Orientation Error: {round(errors[1], 4)}")
+                print(" - X Error: ", round(errors[2], 4))
+                print(" - Y Error: ", round(errors[3], 4))
             else:
                 print(f"{pose_name} - Not completed yet.")
 
