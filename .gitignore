@@ -66,6 +66,10 @@ datasets
 .github/
 
 
-ws_fast_lio/
-ws_livox/
-Livox-SDK2/
+# ws_fast_lio/
+# ws_livox/
+# Livox-SDK2/
+
+build/
+log/
+install/
