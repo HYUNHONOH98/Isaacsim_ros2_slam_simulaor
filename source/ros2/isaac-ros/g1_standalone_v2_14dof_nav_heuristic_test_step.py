@@ -9,6 +9,7 @@
 from utils import *
 from scipy.spatial.transform import Rotation as R
 from scipy.spatial.transform import Slerp
+from tf_transformations import quaternion_matrix, translation_matrix, concatenate_matrices, inverse_matrix, quaternion_from_matrix
 from icecream import ic
 from isaacsim import SimulationApp
 
@@ -246,7 +247,7 @@ parser.add_argument("--rendering_dt", type=float, default=1/100, help="Rendering
 parser.add_argument("--policy-path", type=str, default="source/ros2/isaac-ros/assets/0820_f5/exported/policy.pt", help="Path to the policy file")
 parser.add_argument("--nav-policy-path", type=str, default="/workspace/isaaclab/source/ros2/isaac-ros/assets/weights/navigation/navigation_policy_0623.pt", help="Path to the policy file")
 parser.add_argument("--action-scale", type=float, default=0.5, help="Scale for the action commands")
-parser.add_argument("--period", type=float, default=0.8, help="Phase command period")
+parser.add_argument("--period", type=float, default=1.0, help="Phase command period")
 
 args = parser.parse_args()
 
@@ -589,9 +590,9 @@ heading_error_bs = np.zeros((1,1))
 midsole_diffs = []
 pelvis_diffs = []
 lidar_diffs = []
-
+joint_pelvis_trajs = []
 # =============================== Hyper-parameters ===============================
-free_iter = 2000
+free_iter = 400
 
 # heading_target = -math.pi
 LAST_ITER = 32000
@@ -639,12 +640,22 @@ SLOW_BOUND = 0.4
 MAX_LIN_VEL = 0.15
 MAX_ANG_VEL = 0.3
 NAV_HZ = 5
-ERROR_THRESHOLD = 0.04  # m
-NUM_AVG = 30
+ERROR_THRESHOLD = 0.02  # m
+NUM_AVG = 50
+
+single_step_duration = False
+single_step_iter = 0
+
+left_foot_moment = False
+right_foot_moment = True
+
 # =============================== Main iteration ===============================
 is_first_released = False
+its_end = False
+
 print_simtime = 0
 while simulation_app.is_running():
+
 
     simtime = sim_context.current_time
     if int(simtime) != print_simtime:
@@ -692,6 +703,8 @@ while simulation_app.is_running():
 
     # imu rate 50Hz
     if ( current_iter % 4 == 0 and is_first_released ) and est_pelvis_pos is not None and est_pelvis_quat is not None:
+        if single_step_duration:
+            single_step_iter += 1
         # Iterate over the target poses
         heading_target = target_pose_list[current_target_pose_idx][3].copy()
         target_pos_w = target_pose_list[current_target_pose_idx][:3].copy()
@@ -778,15 +791,82 @@ while simulation_app.is_running():
                 errors_per_pose[current_target_pose_idx][1].append(round(task_y_errors[-1][0], 4))
                 errors_per_pose[current_target_pose_idx][1].append((4000 - time_per_pose) * 0.02)  # time taken
                 time_per_pose = 0
-                stop_counter = 100
+                stop_counter = 50
                 # pos_command_bs = np.zeros((1,1))
                 # heading_error_bs = np.zeros((1,1))
+                its_end = True
 
-        if stop_counter > 0:
-            stop_counter -= 1
-            vel_command_b = np.zeros(3)
-            phase = 0.0
+        if current_iter % int(200/NAV_HZ) ==0:
+            vel_command_b[:2] = np.clip(np.sign(pos_command_b[:2]) * MAX_LIN_VEL * np.sqrt(np.abs(pos_command_b[:2] / SLOW_BOUND)), -MAX_LIN_VEL, MAX_LIN_VEL)
+            vel_command_b[2] = np.clip(np.sign(heading_error) * MAX_ANG_VEL * np.sqrt(np.abs(heading_error / SLOW_BOUND)), -MAX_ANG_VEL, MAX_ANG_VEL)
+
+        if pos_command_bs[-1, :].reshape((1,)) < 0.4 and single_step_duration == False:
+            single_step_duration = True
+            print("===== Single step phase start =====")
+            single_step_iter = 0
+
+
+        if prev_action is None:
+            prev_action = np.zeros(14)
+
+        if single_step_duration == True:
             sin_p, cos_p = 0.0, 1.0
+            vel_command_b = np.zeros(3)
+            def pos_quat_to_matrix(pos, quat):
+                """
+                quat : wxyz
+                """
+                t = translation_matrix([pos[0], pos[1], pos[2]])
+                q = [quat[1], quat[2], quat[3], quat[0]] # wxyz -> xyzw
+                r = quaternion_matrix(q) # xyzw
+                return concatenate_matrices(t, r)
+
+            base_mat_w = pos_quat_to_matrix(base_pos, base_quat)
+            base_mat_w_inv = inverse_matrix(base_mat_w)
+            l_mat_w = pos_quat_to_matrix(l_pos, l_quat)
+            r_mat_w = pos_quat_to_matrix(r_pos, r_quat)
+            l_mat_b = np.dot(base_mat_w_inv, l_mat_w)
+            r_mat_b = np.dot(base_mat_w_inv, r_mat_w)
+            l_trans = l_mat_b[:3, 3]
+            r_trans = r_mat_b[:3, 3]
+
+
+            if left_foot_moment:
+                step_start_iter = 40 # 0.8
+            elif right_foot_moment:
+                step_start_iter = 15 # 0.3
+
+            if single_step_iter >= step_start_iter:
+                if left_foot_moment:
+                    print("Left step")
+                elif right_foot_moment:
+                    print("Right step")
+                print(single_step_iter)
+                phase = ((single_step_iter * 0.02) % args.period) / args.period
+                print(phase)
+                print()
+                sin_p, cos_p = np.sin(2*np.pi*phase), np.cos(2*np.pi*phase)
+                vel_command_b[:2] = np.clip(np.sign(pos_command_b[:2]) * 0.2 * np.sqrt(np.abs(pos_command_b[:2] / SLOW_BOUND)), -0.2, 0.2)
+                vel_command_b[2] = np.clip(np.sign(heading_error) * MAX_ANG_VEL * np.sqrt(np.abs(heading_error / SLOW_BOUND)), -MAX_ANG_VEL, MAX_ANG_VEL)
+            if single_step_iter == step_start_iter + 74:
+                print("===== Single step phase end =====")
+                # if r_trans[0] - l_trans[0] > 0.1:
+                #     left_foot_moment = True
+                #     right_foot_moment = False
+                # else:
+                left_foot_moment = not left_foot_moment
+                right_foot_moment = not right_foot_moment
+                
+                # if left_foot_moment:
+                #     step_start_iter = 40
+                # elif right_foot_moment:
+                #     step_start_iter = 15
+                single_step_iter = step_start_iter - 25
+
+        if stop_counter >= 0 and its_end:
+            sin_p, cos_p = 0.0, 1.0
+            vel_command_b = np.zeros(3)
+            stop_counter -= 1
 
             pos_error = round(task_translation_errors[-1][0], 4)
             ori_error = round(task_orientation_errors[-1][0], 4)
@@ -794,37 +874,11 @@ while simulation_app.is_running():
             errors_per_pose[current_target_pose_idx][1][1] = ori_error
             errors_per_pose[current_target_pose_idx][1][2] = round(task_x_errors[-1][0], 4)
             errors_per_pose[current_target_pose_idx][1][3] = round(task_y_errors[-1][0], 4)
-            pos_command_bs = np.zeros((1,1))
-            heading_error_bs = np.zeros((1,1))
+        if stop_counter < 0:
+            sin_p, cos_p = 0.0, 1.0
+            vel_command_b = np.zeros(3)
+            current_iter = LAST_ITER   # break the loop after this
 
-        if time_per_pose <= 0 and stop_counter <= 0:
-            time_per_pose = 4000
-            current_target_pose_idx += 1
-            if current_target_pose_idx >= len(target_pose_list):
-                current_iter = LAST_ITER
-        time_per_pose -= 1
-
-        # Navigation
-        if current_iter % int(200/NAV_HZ) ==0:
-            # vel_command_b[:2] = np.clip(np.sign(pos_command_b[:2]) * MAX_LIN_VEL * np.sqrt(np.abs(pos_command_b[:2] / SLOW_BOUND)), -MAX_LIN_VEL, MAX_LIN_VEL)
-            # X > 0
-            if pos_command_b[0] >= 0.:
-                vel_command_b[0] = np.clip(MAX_LIN_VEL * np.sqrt(np.abs(pos_command_b[0] / SLOW_BOUND)), 0.0, MAX_LIN_VEL)
-            # X < 0
-            if pos_command_b[0] < 0.:
-                vel_command_b[0] = np.clip(-0.2 * np.sqrt(np.abs(pos_command_b[0] / SLOW_BOUND)), -0.2, 0.0)
-            # Y > 0
-            if pos_command_b[1] >= 0.:
-                vel_command_b[1] = np.clip(MAX_LIN_VEL * np.sqrt(np.abs(pos_command_b[1] / SLOW_BOUND)), 0.0, MAX_LIN_VEL)
-            # Y < 0
-            if pos_command_b[1] < 0.:
-                vel_command_b[1] = np.clip(-MAX_LIN_VEL * np.sqrt(np.abs(pos_command_b[1] / SLOW_BOUND)), -MAX_LIN_VEL, 0.0)
-            
-            vel_command_b[2] = np.clip(np.sign(heading_error) * MAX_ANG_VEL * np.sqrt(np.abs(heading_error / SLOW_BOUND)), -MAX_ANG_VEL, MAX_ANG_VEL)
-
-        if prev_action is None:
-            prev_action = np.zeros(14)
-        
         obs = np.concatenate([
             base_ang_vel_b,
             gravity_ori,
@@ -847,10 +901,22 @@ while simulation_app.is_running():
 
         prev_action = action.copy()
 
+        # if sin_p == 0. and cos_p == 1. and np.linalg.norm(linear_velocities) < 0.05:
+        #     print("stop pose logged")
+        #     joint_positions = av.get_joint_positions()
+
+        #     joint_pelvis_trajs.append({
+        #         "joint_pos" : joint_positions,
+        #         "base_quat" : base_quat,
+        #         "base_pos" : base_pos
+        #     })
+
 
     # joint position target is set synchronized with physics dt (200Hz)
     av.set_joint_position_targets(joint_targets)
     av.set_joint_velocity_targets(np.zeros(29))
+
+
 
     # imu rate 200Hz
     imu_pub_node.publish_imu(imu_sensor.get_current_frame(read_gravity=True), simtime=simtime)
@@ -972,6 +1038,8 @@ while simulation_app.is_running():
         plt.tight_layout()
         plt.savefig(os.path.join(log_dir, "slam_errors_of_frames.png"))
         plt.close()
+
+        np.save("source/ros2/isaac-ros/g1_data/exp_log/stop_trajs.npy", np.array(joint_pelvis_trajs))
 
 
         simulation_app.close()

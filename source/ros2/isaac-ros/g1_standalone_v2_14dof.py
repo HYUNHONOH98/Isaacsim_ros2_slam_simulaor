@@ -526,7 +526,8 @@ free_iter = 2000
 
 heading_target = 0.0
 # heading_target = -math.pi
-vel_command_b[0] = 0.1
+# vel_command_b[0] = 0.1
+vel_command_b[1] = -0.1
 # stop_iter = 4000
 # LAST_ITER = 5000 + 2000
 LAST_ITER = 5000
@@ -700,6 +701,8 @@ while simulation_app.is_running():
         )
         print("lidar lin jitter max:", np.round(np.max(lidar_lin_jitters, axis=0), 4))
         print("lidar ang jitter max:", np.round(np.max(lidar_ang_jitters, axis=0), 4))
+
+        print("Distance traveled:", np.linalg.norm(base_pos[:2]))
         simulation_app.close()
                 
         for node in nodes:
