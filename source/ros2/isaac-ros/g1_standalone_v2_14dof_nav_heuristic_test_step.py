@@ -832,9 +832,9 @@ while simulation_app.is_running():
 
 
             if left_foot_moment:
-                step_start_iter = 40 # 0.8
+                step_start_iter = 39 # 0.8
             elif right_foot_moment:
-                step_start_iter = 15 # 0.3
+                step_start_iter = 14 # 0.3
 
             if single_step_iter >= step_start_iter:
                 if left_foot_moment:
