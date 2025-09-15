@@ -12,7 +12,7 @@ from scipy.spatial.transform import Slerp
 from icecream import ic
 from isaacsim import SimulationApp
 
-simulation_app = SimulationApp({"headless": True})
+simulation_app = SimulationApp({"headless": False})
 
 import argparse
 import torch
