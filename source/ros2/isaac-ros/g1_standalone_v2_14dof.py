@@ -199,6 +199,28 @@ class G1:
             self.joint_indices.append(full_joint_names.index(joint_seq))
         self.joint_indices = np.array(self.joint_indices)
 
+        self.default_joint_indices = []
+        for joint_seq in [
+                'waist_yaw_joint',
+                'left_shoulder_pitch_joint',
+                'right_shoulder_pitch_joint',
+                'left_shoulder_roll_joint',
+                'right_shoulder_roll_joint',
+                'left_shoulder_yaw_joint',
+                'right_shoulder_yaw_joint',
+                'left_elbow_joint',
+                'right_elbow_joint',
+                'left_wrist_roll_joint',
+                'right_wrist_roll_joint',
+                'left_wrist_pitch_joint',
+                'right_wrist_pitch_joint',
+                'left_wrist_yaw_joint',
+                'right_wrist_yaw_joint'
+            ]:
+            assert joint_seq in full_joint_names, f"Joint {joint_seq} not found in robot's joint names"
+            self.default_joint_indices.append(full_joint_names.index(joint_seq))
+        self.default_joint_indices = np.array(self.default_joint_indices)
+
         joints_default_position = []
         for joint_name in full_joint_names:
             if joint_name in default_joint_angles.keys():
@@ -526,8 +548,8 @@ free_iter = 2000
 
 heading_target = 0.0
 # heading_target = -math.pi
-# vel_command_b[0] = 0.1
-vel_command_b[1] = -0.1
+vel_command_b[0] = 0.1
+# vel_command_b[1] = -0.1
 # stop_iter = 4000
 # LAST_ITER = 5000 + 2000
 LAST_ITER = 5000
@@ -628,6 +650,9 @@ while simulation_app.is_running():
         action = policy(obs_tensor).detach().numpy().squeeze()
 
         joint_targets[g1.joint_indices] = (action * args.action_scale).copy()
+        if "0901_f2" in args.policy_path:
+            joint_targets[g1.default_joint_indices] = g1.default_pos[g1.default_joint_indices]
+            
         prev_action[:] = action.copy()
 
         if fixed == True:

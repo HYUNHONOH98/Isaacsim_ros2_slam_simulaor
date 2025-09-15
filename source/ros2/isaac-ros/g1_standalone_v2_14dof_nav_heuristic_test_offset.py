@@ -204,6 +204,28 @@ class G1:
             self.joint_indices.append(full_joint_names.index(joint_seq))
         self.joint_indices = np.array(self.joint_indices)
 
+        self.default_joint_indices = []
+        for joint_seq in [
+                'waist_yaw_joint',
+                'left_shoulder_pitch_joint',
+                'right_shoulder_pitch_joint',
+                'left_shoulder_roll_joint',
+                'right_shoulder_roll_joint',
+                'left_shoulder_yaw_joint',
+                'right_shoulder_yaw_joint',
+                'left_elbow_joint',
+                'right_elbow_joint',
+                'left_wrist_roll_joint',
+                'right_wrist_roll_joint',
+                'left_wrist_pitch_joint',
+                'right_wrist_pitch_joint',
+                'left_wrist_yaw_joint',
+                'right_wrist_yaw_joint'
+            ]:
+            assert joint_seq in full_joint_names, f"Joint {joint_seq} not found in robot's joint names"
+            self.default_joint_indices.append(full_joint_names.index(joint_seq))
+        self.default_joint_indices = np.array(self.default_joint_indices)
+
         joints_default_position = []
         for joint_name in full_joint_names:
             if joint_name in default_joint_angles.keys():
@@ -243,7 +265,7 @@ parser.add_argument("--physics_dt", type=float, default=1/200, help="Physics sim
 parser.add_argument("--rendering_dt", type=float, default=1/100, help="Rendering time step")
 # Policy parameters
 # parser.add_argument("--policy-path", type=str, default="source/ros2/isaac-ros/assets/0818_f3/exported/policy.pt", help="Path to the policy file")
-parser.add_argument("--policy-path", type=str, default="source/ros2/isaac-ros/assets/0820_f5/exported/policy.pt", help="Path to the policy file")
+parser.add_argument("--policy-path", type=str, default="/workspace/isaaclab/source/ros2/isaac-ros/assets/0911_l1_20k.pt", help="Path to the policy file")
 parser.add_argument("--nav-policy-path", type=str, default="/workspace/isaaclab/source/ros2/isaac-ros/assets/weights/navigation/navigation_policy_0623.pt", help="Path to the policy file")
 parser.add_argument("--action-scale", type=float, default=0.5, help="Scale for the action commands")
 parser.add_argument("--period", type=float, default=0.8, help="Phase command period")
@@ -549,6 +571,8 @@ slam_node = SlamSubscriber()
 nodes.append(slam_node)
 lidar_tf_node = MidsoleTFPublisher()
 nodes.append(lidar_tf_node)
+target_tf_pub = TargetTFPublisher()
+nodes.append(target_tf_pub)
 
 # =============================== Parameters ===============================
 lidar_iter = 0
@@ -591,7 +615,7 @@ pelvis_diffs = []
 lidar_diffs = []
 
 # =============================== Hyper-parameters ===============================
-free_iter = 2000
+free_iter = 1000
 
 # heading_target = -math.pi
 LAST_ITER = 32000
@@ -601,7 +625,7 @@ LAST_ITER = 32000
 
 target_pose_list = np.array([
     # go forward
-    [1.0, 0.0, 0.0, 0.0],
+    [1.0, 0.2, 0.0, math.pi/4],
     # # go backward
     # [0.0, 0.0, 0.0, 0.0],
     # # go left
@@ -629,7 +653,7 @@ stop_counter = 0
 ## pelvis <> midsole offset
 pelvis_to_midsole_offset_after_locomotion = {
     # "x": -0.0069,
-    "x": -0.00,
+    "x": -0.00, # -0.04
     # "y": -0.0194,
     "y": -0.0094,
     "yaw": 0.0061,
@@ -639,7 +663,7 @@ SLOW_BOUND = 0.4
 MAX_LIN_VEL = 0.15
 MAX_ANG_VEL = 0.3
 NAV_HZ = 5
-ERROR_THRESHOLD = 0.04  # m
+ERROR_THRESHOLD = 0.03  # m
 NUM_AVG = 30
 # =============================== Main iteration ===============================
 is_first_released = False
@@ -697,7 +721,7 @@ while simulation_app.is_running():
         target_pos_w = target_pose_list[current_target_pose_idx][:3].copy()
 
         target_midsole_quat = np.array([np.cos(heading_target/2), 0.0, 0.0, np.sin(heading_target/2)]).astype(np.float32)
-
+        target_tf_pub.publish_tf(target_pos_w, target_midsole_quat, simtime)
         offset = quat_apply(target_midsole_quat, 
                     np.array(
                        [pelvis_to_midsole_offset_after_locomotion["x"], 
@@ -707,7 +731,7 @@ while simulation_app.is_running():
                     )
         # print("offset : ", offset)
         
-        if True:
+        if False:
             # Offset 보정 적용
             pelvis_target_pos_w = target_pos_w + offset
             pelvis_heading_target = heading_target + pelvis_to_midsole_offset_after_locomotion["yaw"]
@@ -747,10 +771,13 @@ while simulation_app.is_running():
         heading_error_bs = np.vstack((heading_error_bs, heading_error.reshape(1,1)))
         slam_errors = np.vstack((slam_errors, np.linalg.norm(base_pos[:2] - est_pelvis_pos[:2]).reshape((1,1))))
         pos_command_bs = np.vstack((pos_command_bs, np.linalg.norm(pos_command_b[:2]).reshape((1,1))))
+
+        task_vec = target_pos_w - midsole_pos_w
+        task_vec_b = quat_rotate_inverse(yaw_quat(base_quat).astype(np.float32), task_vec.astype(np.float32))
         
         task_translation_errors = np.vstack((task_translation_errors, np.linalg.norm(target_pos_w[:2] - midsole_pos_w[:2]).reshape((1,1))))
-        task_x_errors = np.vstack((task_x_errors, np.array(target_pos_w[0] - midsole_pos_w[0]).reshape((1,1))))
-        task_y_errors = np.vstack((task_y_errors, np.array(target_pos_w[1] - midsole_pos_w[1]).reshape((1,1))))
+        task_x_errors = np.vstack((task_x_errors, np.array(task_vec_b[0]).reshape((1,1))))
+        task_y_errors = np.vstack((task_y_errors, np.array(task_vec_b[1]).reshape((1,1))))
         midsole_forward_w = quat_apply(midsole_quat_w.astype(np.float32), np.array([1., 0., 0.]).astype(np.float32))
         midsole_heading_w = np.arctan2(forward_w[1], forward_w[0])
         midsole_heading_error = wrap_to_pi(np.array([heading_target]).astype(np.float32) - np.array([heading_w]).astype(np.float32))
@@ -809,18 +836,18 @@ while simulation_app.is_running():
             # vel_command_b[:2] = np.clip(np.sign(pos_command_b[:2]) * MAX_LIN_VEL * np.sqrt(np.abs(pos_command_b[:2] / SLOW_BOUND)), -MAX_LIN_VEL, MAX_LIN_VEL)
             # X > 0
             if pos_command_b[0] >= 0.:
-                vel_command_b[0] = np.clip(MAX_LIN_VEL * np.sqrt(np.abs(pos_command_b[0] / SLOW_BOUND)), 0.0, MAX_LIN_VEL)
+                vel_command_b[0] = np.clip(0.08 * np.sqrt(np.abs(pos_command_b[0] / 0.8)), 0.0, 0.08)
             # X < 0
             if pos_command_b[0] < 0.:
-                vel_command_b[0] = np.clip(-0.2 * np.sqrt(np.abs(pos_command_b[0] / SLOW_BOUND)), -0.2, 0.0)
+                vel_command_b[0] = np.clip(-0.4 * np.sqrt(np.abs(pos_command_b[0] / 0.1)), -0.4, 0.0)
             # Y > 0
             if pos_command_b[1] >= 0.:
-                vel_command_b[1] = np.clip(MAX_LIN_VEL * np.sqrt(np.abs(pos_command_b[1] / SLOW_BOUND)), 0.0, MAX_LIN_VEL)
+                vel_command_b[1] = np.clip(0.1 * np.sqrt(np.abs(pos_command_b[1] / 0.2)), 0.0, 0.1)
             # Y < 0
             if pos_command_b[1] < 0.:
-                vel_command_b[1] = np.clip(-MAX_LIN_VEL * np.sqrt(np.abs(pos_command_b[1] / SLOW_BOUND)), -MAX_LIN_VEL, 0.0)
+                vel_command_b[1] = np.clip(-0.2 * np.sqrt(np.abs(pos_command_b[1] / 0.2)), -0.2, 0.0)
             
-            vel_command_b[2] = np.clip(np.sign(heading_error) * MAX_ANG_VEL * np.sqrt(np.abs(heading_error / SLOW_BOUND)), -MAX_ANG_VEL, MAX_ANG_VEL)
+            vel_command_b[2] = np.clip(np.sign(heading_error) * MAX_ANG_VEL * np.sqrt(np.abs(heading_error / SLOW_BOUND)), -0.2, 0.2)
 
         if prev_action is None:
             prev_action = np.zeros(14)
@@ -841,6 +868,9 @@ while simulation_app.is_running():
         action = policy(obs_tensor).detach().numpy().squeeze()
 
         joint_targets[g1.joint_indices] = (action * args.action_scale).copy()
+        if "0901_f2" in args.policy_path:
+            joint_targets[g1.default_joint_indices] = g1.default_pos[g1.default_joint_indices]
+
         if fixed == True:
             joint_targets = np.zeros(29)
             prev_action = np.zeros(14)

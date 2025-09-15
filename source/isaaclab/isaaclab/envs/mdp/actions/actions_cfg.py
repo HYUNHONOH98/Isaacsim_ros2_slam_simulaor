@@ -56,6 +56,15 @@ class JointPositionActionCfg(JointActionCfg):
     """Additional scaling factor for the random torque RFI."""
 
 @configclass
+class DefaultJointPositionActionCfg(JointActionCfg):
+    """Configuration for the joint position action term.
+
+    See :class:`JointPositionAction` for more details.
+    """
+
+    class_type: type[ActionTerm] = joint_actions.DefaultJointPositionAction
+
+@configclass
 class RelativeJointPositionActionCfg(JointActionCfg):
     """Configuration for the relative joint position action term.
 

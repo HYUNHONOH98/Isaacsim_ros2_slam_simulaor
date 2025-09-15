@@ -170,6 +170,29 @@ class JointPositionAction(JointAction):
             self._asset.set_joint_effort_target(torque_rfi, joint_ids=self._joint_ids)
 
 
+class DefaultJointPositionAction(JointAction):
+    cfg: actions_cfg.DefaultJointPositionActionCfg
+    """The configuration of the action term."""
+
+    def __init__(self, cfg: actions_cfg.DefaultJointPositionActionCfg, env: ManagerBasedEnv):
+        # initialize the action term
+        super().__init__(cfg, env)
+        # use default joint positions as offset
+        self._offset = self._asset.data.default_joint_pos[:, self._joint_ids].clone()
+
+    @property
+    def action_dim(self) -> int:
+        return 0
+    
+    def process_actions(self, actions: torch.Tensor):
+        
+        self._processed_actions = self._offset
+
+    def apply_actions(self):
+        # set position targets
+        self._asset.set_joint_position_target(self._offset, joint_ids=self._joint_ids)
+        
+
 class RelativeJointPositionAction(JointAction):
     r"""Joint action term that applies the processed actions to the articulation's joints as relative position commands.
 

@@ -1027,7 +1027,7 @@ def penalize_feet_z_force(
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
     feet_forces = th.abs(contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, 2] - threshold)
 
-    ic(feet_forces)
+    # ic(feet_forces)
     feet_forces_over_threshold = th.clamp(feet_forces, min=0.0)
     
     return th.sum(feet_forces_over_threshold, dim=-1)

@@ -176,7 +176,16 @@ class ActionsCfg:
         randomize_torque_rfi=True,
         rfi_lim_scale=0.1,  # Scale factor for the random torque R
     )
-
+    
+    # fixed_joint_pos = mdp.DefaultJointPositionActionCfg(
+    #     asset_name="robot",
+    #     joint_names=[
+    #         "waist_yaw_joint",
+    #         ".*_shoulder_.*",
+    #         ".*_wrist_.*",
+    #         ".*_elbow_.*"
+    #     ]
+    # )
 
 @configclass
 class EventCfg:
@@ -428,10 +437,10 @@ class G1LocomotionEnvCfg_PLAY(G1LocomotionEnvCfg):
 
         # set command for play.
 
-        # self.commands.base_velocity.ranges.lin_vel_x = (0.1, 0.1)
+        self.commands.base_velocity.ranges.lin_vel_x = (0.1, 0.1)
         # self.commands.base_velocity.ranges.lin_vel_y = (0.5, 0.5)
         # self.commands.base_velocity.ranges.ang_vel_z = (1., 1.)
-        self.commands.base_velocity.ranges.lin_vel_x = (0.0, 0.0)
+        # self.commands.base_velocity.ranges.lin_vel_x = (0.0, 0.0)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
         self.commands.base_velocity.ranges.ang_vel_z = (-1.0, 1.0)
 
