@@ -1,118 +1,290 @@
-# From maintainer
-This is updated repo initialized from isaaclab v2.1.0.
+# Isaac Sim ROS2 SLAM Simulator (G1)
 
-This version of isaaclab uses isaacsim 4.5.0.
+This repository is a project-focused Isaac Lab fork for **G1 locomotion + LiDAR + SLAM** experiments.
 
-Main purpose is to reproduce locomotion policy for humanoid G1 which was train on isaacsim 4.2.0 (old isaaclab version) from isaacsim 4.5.0.
+- Base: Isaac Lab `v2.1.0`
+- Isaac Sim: `4.5.0`
+- Main working directory: `source/ros2/isaac-ros`
 
-Core changes were made on `locomotion_task` directory.
+Primary experiment script:
+- `source/ros2/isaac-ros/g1_standalone_v2_14dof_nav_heuristic_test_midsole.py`
 
-There will be numpy related error when you start docker container directly - so I recommend you to check the package versions, especially versions of "numpy", "scipy", "lxml", "dex-retargeting". 
+## What Is In `source/ros2/isaac-ros`
 
-For my experience, most of the dependency issues were solved when I lower the numpy version and lxml version. (+ remove dex-retargeting)
+### Main launch scripts
 
-`python -m pip install --no-cache-dir 'lxml<5.0.0' 'numpy==1.26.4'`
-`python -m pip uninstall -y dex-retargeting`
+- `g1_v1.sh`: run `g1_standalone_v1.py` (legacy locomotion policy).
+- `g1_v2.sh`: run `g1_standalone_v2.py` (updated locomotion policy).
+- `run.sh`: start ROS2-side runtime nodes for state publishing, TF bridging, Fast-LIO launch, and RViz.
 
-# Original
+### Key standalone simulators
 
-![Isaac Lab](docs/source/_static/isaaclab.jpg)
+- `g1_standalone_v2.py`: locomotion + sensor publishing (`/points`, `imu/data`, `/g1/odom`).
+- `g1_standalone_v2_nav.py`: locomotion + SLAM-feedback navigation policy (`est_pelvis` based).
+- `g1_standalone_v2_nav_heuristic*.py`: heuristic/test variants with additional logging.
+- `g1_standalone_v2_14dof*.py`: 14-DoF controller variants.
+- `g1_standalone_v2_14dof_nav_heuristic_test_midsole.py`: main experiment entrypoint in this project.
 
----
+### ROS utility nodes (`utils/`)
 
-# Isaac Lab
+- `lidar_node.py`: publishes LiDAR point cloud as `PointCloud2` on `points`.
+- `imu_node.py`: publishes IMU on `imu/data`.
+- `odom_node.py`: publishes odometry on `/g1/odom` and TF `odom -> pelvis`.
+- `state_pub.py`: converts `/g1/joint_states` to `joint_states` for `robot_state_publisher`.
+- `state_pub.launch.py`: launches `robot_state_publisher` with `g1_29dof_rev_1_0_lidar.urdf`.
+- `static_node.py`: publishes required static/initial transforms used by SLAM pipeline.
+- `slam_subscribe_node.py`: reads SLAM-estimated transforms from TF.
+- `lidar_tf_node.py`: computes/publishes `odom -> est_pelvis` from SLAM frame + kinematic transform.
+- `analysis_node.py`: logs SLAM-vs-GT error and saves plots under `g1_data/exp_log/`.
 
-[![IsaacSim](https://img.shields.io/badge/IsaacSim-4.5.0-silver.svg)](https://docs.isaacsim.omniverse.nvidia.com/latest/index.html)
-[![Python](https://img.shields.io/badge/python-3.10-blue.svg)](https://docs.python.org/3/whatsnew/3.10.html)
-[![Linux platform](https://img.shields.io/badge/platform-linux--64-orange.svg)](https://releases.ubuntu.com/20.04/)
-[![Windows platform](https://img.shields.io/badge/platform-windows--64-orange.svg)](https://www.microsoft.com/en-us/)
-[![pre-commit](https://img.shields.io/github/actions/workflow/status/isaac-sim/IsaacLab/pre-commit.yaml?logo=pre-commit&logoColor=white&label=pre-commit&color=brightgreen)](https://github.com/isaac-sim/IsaacLab/actions/workflows/pre-commit.yaml)
-[![docs status](https://img.shields.io/github/actions/workflow/status/isaac-sim/IsaacLab/docs.yaml?label=docs&color=brightgreen)](https://github.com/isaac-sim/IsaacLab/actions/workflows/docs.yaml)
-[![License](https://img.shields.io/badge/license-BSD--3-yellow.svg)](https://opensource.org/licenses/BSD-3-Clause)
-[![License](https://img.shields.io/badge/license-Apache--2.0-yellow.svg)](https://opensource.org/license/apache-2-0)
+## ROS Interfaces Used By This Project
 
+- Point cloud: `points`
+- IMU: `imu/data`
+- Robot odom: `/g1/odom`
+- Joint states in: `/g1/joint_states`
+- Joint states out: `joint_states`
+- Sim clock: `/clock`
+- Important TF frames: `odom`, `body`, `pelvis`, `mid360_link`, `mid360_link_frame`, `lidar_sensor`, `est_pelvis`
 
-**Isaac Lab** is a GPU-accelerated, open-source framework designed to unify and simplify robotics research workflows, such as reinforcement learning, imitation learning, and motion planning. Built on [NVIDIA Isaac Sim](https://docs.isaacsim.omniverse.nvidia.com/latest/index.html), it combines fast and accurate physics and sensor simulation, making it an ideal choice for sim-to-real transfer in robotics.
+## Development Environment Setup (No Existing ROS2 Assumed)
 
-Isaac Lab provides developers with a range of essential features for accurate sensor simulation, such as RTX-based cameras, LIDAR, or contact sensors. The framework's GPU acceleration enables users to run complex simulations and computations faster, which is key for iterative processes like reinforcement learning and data-intensive tasks. Moreover, Isaac Lab can run locally or be distributed across the cloud, offering flexibility for large-scale deployments.
+This section is the recommended path for a new machine: **build Docker container first, then use ROS2 inside it**.
 
-## Key Features
+### 1. Host prerequisites
 
-Isaac Lab offers a comprehensive set of tools and environments designed to facilitate robot learning:
-- **Robots**: A diverse collection of robots, from manipulators, quadrupeds, to humanoids, with 16 commonly available models.
-- **Environments**: Ready-to-train implementations of more than 30 environments, which can be trained with popular reinforcement learning frameworks such as RSL RL, SKRL, RL Games, or Stable Baselines. We also support multi-agent reinforcement learning.
-- **Physics**: Rigid bodies, articulated systems, deformable objects
-- **Sensors**: RGB/depth/segmentation cameras, camera annotations, IMU, contact sensors, ray casters.
+On the host machine, prepare:
 
+- NVIDIA GPU driver
+- Docker Engine + Docker Compose plugin
+- NVIDIA Container Toolkit
+- Access to NVIDIA Isaac Sim container image (`nvcr.io/nvidia/isaac-sim:4.5.0`)
 
-## Getting Started
+Quick checks:
 
-Our [documentation page](https://isaac-sim.github.io/IsaacLab) provides everything you need to get started, including detailed tutorials and step-by-step guides. Follow these links to learn more about:
+```bash
+docker --version
+docker compose version
+nvidia-smi
+docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi
+```
 
-- [Installation steps](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html#local-installation)
-- [Reinforcement learning](https://isaac-sim.github.io/IsaacLab/main/source/overview/reinforcement-learning/rl_existing_scripts.html)
-- [Tutorials](https://isaac-sim.github.io/IsaacLab/main/source/tutorials/index.html)
-- [Available environments](https://isaac-sim.github.io/IsaacLab/main/source/overview/environments.html)
+### 2. Clone and enter repository
 
+```bash
+git clone <this-repo-url>
+cd Isaacsim_ros2_slam_simulaor
+```
 
-## Contributing to Isaac Lab
+### 3. Login to NGC container registry
 
-We wholeheartedly welcome contributions from the community to make this framework mature and useful for everyone.
-These may happen as bug reports, feature requests, or code contributions. For details, please check our
-[contribution guidelines](https://isaac-sim.github.io/IsaacLab/main/source/refs/contributing.html).
+```bash
+docker login nvcr.io
+```
 
-## Show & Tell: Share Your Inspiration
+Use your NGC key as password (`$oauthtoken` is typically the username).
 
-We encourage you to utilize our [Show & Tell](https://github.com/isaac-sim/IsaacLab/discussions/categories/show-and-tell) area in the
-`Discussions` section of this repository. This space is designed for you to:
+### 4. Build and start ROS2-enabled container
 
-* Share the tutorials you've created
-* Showcase your learning content
-* Present exciting projects you've developed
+From repo root:
 
-By sharing your work, you'll inspire others and contribute to the collective knowledge
-of our community. Your contributions can spark new ideas and collaborations, fostering
-innovation in robotics and simulation.
+```bash
+python3 docker/container.py start ros2
+```
+
+This builds `isaac-lab-ros2` using `docker/Dockerfile.ros2` and runs container `isaac-lab-ros2`.
+
+### 5. Enter container
+
+```bash
+python3 docker/container.py enter ros2
+```
+
+Inside container, your workspace is `/workspace/isaaclab`.
+
+### 6. Install/repair Python dependencies used by this project
+
+Inside container:
+
+```bash
+cd /workspace/isaaclab
+isaaclab -i
+
+# Maintainer-proven fix for version conflicts
+python -m pip install --no-cache-dir 'lxml<5.0.0' 'numpy==1.26.4'
+python -m pip uninstall -y dex-retargeting
+```
+
+### 7. Install ROS2 runtime packages used by scripts
+
+`run.sh` depends on tools not always present in minimal `ros-base` profile.
+
+```bash
+apt-get update
+apt-get install -y \
+  ros-humble-rviz2 \
+  ros-humble-robot-state-publisher \
+  ros-humble-tf-transformations \
+  ros-humble-sensor-msgs-py \
+  ros-humble-tf2-ros
+```
+
+### 8. Install Fast-LIO2 in a ROS2 workspace (external dependency)
+
+`fast_lio` is **not vendored** in this repo, but `run.sh` expects this command to work:
+
+```bash
+ros2 launch fast_lio mapping.launch.py config_file:=ouster64.yaml rviz:=false
+```
+
+So your ROS2 workspace must provide package `fast_lio` with `mapping.launch.py` and `ouster64.yaml`.
+
+Use this ROS2 repository:
+- https://github.com/Ericsii/FAST_LIO_ROS2
+
+Install Fast-LIO2 by following the instructions in that repository.
+Typical starting point:
+
+```bash
+mkdir -p /workspace/ros2_ws/src
+cd /workspace/ros2_ws/src
+
+# Use the upstream ROS2 Fast-LIO2 repository
+git clone https://github.com/Ericsii/FAST_LIO_ROS2.git
+
+# Then follow the exact build/dependency instructions in:
+# https://github.com/Ericsii/FAST_LIO_ROS2
+# (including any required dependencies and workspace steps)
+
+cd /workspace/ros2_ws
+source /opt/ros/humble/setup.bash
+```
+
+After you finish the upstream build instructions successfully:
+
+```bash
+echo 'source /workspace/ros2_ws/install/setup.bash' >> ~/.bashrc
+source /workspace/ros2_ws/install/setup.bash
+```
+
+## Running LiDAR + SLAM Simulation
+
+Use two terminals **inside the same container**.
+Always run the commands from `source/ros2/isaac-ros` because `run.sh` uses relative paths.
+
+### Terminal 1: run simulator (main experiment)
+
+```bash
+cd /workspace/isaaclab/source/ros2/isaac-ros
+/workspace/isaaclab/_isaac_sim/python.sh g1_standalone_v2_14dof_nav_heuristic_test_midsole.py
+```
+
+This runs the project's primary experiment and publishes LiDAR/IMU/odom topics from Isaac Sim.
+
+If you want the simpler baseline locomotion script instead:
+
+```bash
+cd /workspace/isaaclab/source/ros2/isaac-ros
+bash g1_v2.sh
+```
+
+### Terminal 2: run ROS2 + SLAM stack
+
+```bash
+cd /workspace/isaaclab/source/ros2/isaac-ros
+source /opt/ros/humble/setup.bash
+source /workspace/ros2_ws/install/setup.bash
+bash run.sh
+```
+
+`run.sh` starts:
+
+- `utils/state_pub.py`
+- `utils/state_pub.launch.py` (`robot_state_publisher`)
+- `utils/static_node.py`
+- `utils/analysis_node.py`
+- `fast_lio mapping.launch.py`
+- `rviz2`
+
+## SLAM-Feedback Navigation Run
+
+If you want SLAM estimate (`est_pelvis`) to drive navigation policy:
+
+### Terminal 1
+
+```bash
+cd /workspace/isaaclab/source/ros2/isaac-ros
+/workspace/isaaclab/_isaac_sim/python.sh g1_standalone_v2_nav.py
+```
+
+### Terminal 2
+
+```bash
+cd /workspace/isaaclab/source/ros2/isaac-ros
+source /opt/ros/humble/setup.bash
+source /workspace/ros2_ws/install/setup.bash
+bash run.sh
+```
+
+## Useful Verification Commands
+
+Run in any ROS2 terminal in container:
+
+```bash
+ros2 topic list
+ros2 topic hz /points
+ros2 topic hz /imu/data
+ros2 topic hz /g1/odom
+ros2 run tf2_ros tf2_echo odom body
+ros2 run tf2_ros tf2_echo odom est_pelvis
+```
+
+## Customizing Scripts
+
+All major simulators support runtime arguments such as:
+
+- `--policy-path`
+- `--nav-policy-path` (navigation variants)
+- `--physics_dt`
+- `--rendering_dt`
+- `--period`
+
+Example:
+
+```bash
+/workspace/isaaclab/_isaac_sim/python.sh g1_standalone_v2_nav.py \
+  --policy-path source/ros2/isaac-ros/assets/r3/exported/policy.pt \
+  --nav-policy-path source/ros2/isaac-ros/assets/weights/navigation/0818_nav_policy.pt
+```
+
+## Shutdown
+
+- Stop simulator and ROS processes with `Ctrl+C` in each terminal.
+- Exit container shells with `exit`.
+- On host, stop container:
+
+```bash
+python3 docker/container.py stop ros2
+```
 
 ## Troubleshooting
 
-Please see the [troubleshooting](https://isaac-sim.github.io/IsaacLab/main/source/refs/troubleshooting.html) section for
-common fixes or [submit an issue](https://github.com/isaac-sim/IsaacLab/issues).
-
-For issues related to Isaac Sim, we recommend checking its [documentation](https://docs.omniverse.nvidia.com/app_isaacsim/app_isaacsim/overview.html)
-or opening a question on its [forums](https://forums.developer.nvidia.com/c/agx-autonomous-machines/isaac/67).
-
-## Support
-
-* Please use GitHub [Discussions](https://github.com/isaac-sim/IsaacLab/discussions) for discussing ideas, asking questions, and requests for new features.
-* Github [Issues](https://github.com/isaac-sim/IsaacLab/issues) should only be used to track executable pieces of work with a definite scope and a clear deliverable. These can be fixing bugs, documentation issues, new features, or general updates.
-
-## Connect with the NVIDIA Omniverse Community
-
-Have a project or resource you'd like to share more widely? We'd love to hear from you! Reach out to the
-NVIDIA Omniverse Community team at OmniverseCommunity@nvidia.com to discuss potential opportunities
-for broader dissemination of your work.
-
-Join us in building a vibrant, collaborative ecosystem where creativity and technology intersect. Your
-contributions can make a significant impact on the Isaac Lab community and beyond!
+- `rviz2: command not found`
+  - Install `ros-humble-rviz2` inside container.
+- `Package 'fast_lio' not found`
+  - Ensure you installed `FAST_LIO_ROS2` and followed its instructions completely:
+    - https://github.com/Ericsii/FAST_LIO_ROS2
+  - Then source your ROS2 workspace (`/workspace/ros2_ws/install/setup.bash`).
+- `ModuleNotFoundError` or version conflicts after container start
+  - Apply maintainer fix:
+    - `python -m pip install --no-cache-dir 'lxml<5.0.0' 'numpy==1.26.4'`
+    - `python -m pip uninstall -y dex-retargeting`
+- No `odom -> body` TF
+  - Fast-LIO is not running correctly or not receiving `/points` + `imu/data`.
+- No `odom -> est_pelvis` TF
+  - Ensure `g1_standalone_v2_nav.py` is running (it publishes this through `LidarTFPublisher`).
 
 ## License
 
-The Isaac Lab framework is released under [BSD-3 License](LICENSE). The `isaaclab_mimic` extension and its corresponding standalone scripts are released under [Apache 2.0](LICENSE-mimic). The license files of its dependencies and assets are present in the [`docs/licenses`](docs/licenses) directory.
-
-## Acknowledgement
-
-Isaac Lab development initiated from the [Orbit](https://isaac-orbit.github.io/) framework. We would appreciate if you would cite it in academic publications as well:
-
-```
-@article{mittal2023orbit,
-   author={Mittal, Mayank and Yu, Calvin and Yu, Qinxi and Liu, Jingzhou and Rudin, Nikita and Hoeller, David and Yuan, Jia Lin and Singh, Ritvik and Guo, Yunrong and Mazhar, Hammad and Mandlekar, Ajay and Babich, Buck and State, Gavriel and Hutter, Marco and Garg, Animesh},
-   journal={IEEE Robotics and Automation Letters},
-   title={Orbit: A Unified Simulation Framework for Interactive Robot Learning Environments},
-   year={2023},
-   volume={8},
-   number={6},
-   pages={3740-3747},
-   doi={10.1109/LRA.2023.3270034}
-}
-```
+- Core project: [BSD-3-Clause](LICENSE)
+- `isaaclab_mimic`: [Apache-2.0](LICENSE-mimic)
